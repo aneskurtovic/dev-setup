@@ -1,0 +1,17 @@
+*.local.json
+test-results/
+*.local.*
+.env
+.env.*
+!.env.example
+state/
+backups/
+artifacts/
+*.log
+*.zip
+*.bak
+*.pem
+*.key
+installation.json
+projects.json
+PLAND.md

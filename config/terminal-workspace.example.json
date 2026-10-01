@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "id": "my-project",
+  "displayName": "My Project",
+  "layout": {
+    "codexFraction": 0.5,
+    "claudeFraction": 0.5
+  }
+}

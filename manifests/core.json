@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    { "name": "powershell", "id": "Microsoft.PowerShell", "source": "winget", "command": "pwsh.exe", "minimumVersion": "7.2.0", "versionArguments": ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"] },
+    { "name": "terminal", "id": "Microsoft.WindowsTerminal", "source": "winget", "command": "wt.exe", "minimumVersion": "1.17.0", "versionArguments": [] },
+    { "name": "git", "id": "Git.Git", "source": "winget", "command": "git.exe", "minimumVersion": "2.0.0", "versionArguments": ["--version"] },
+    { "name": "github", "id": "GitHub.cli", "source": "winget", "command": "gh.exe", "minimumVersion": "2.0.0", "versionArguments": ["--version"] }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "packages": [
+    { "name": "powershell", "id": "Microsoft.PowerShell", "source": "winget", "command": "pwsh.exe", "minimumVersion": "7.2.0", "versionArguments": ["-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"] },
+    { "name": "terminal", "id": "Microsoft.WindowsTerminal", "source": "winget", "command": "wt.exe", "minimumVersion": "1.17.0", "versionArguments": [] },
+    { "name": "git", "id": "Git.Git", "source": "winget", "command": "git.exe", "minimumVersion": "2.0.0", "versionArguments": ["--version"] },
+    { "name": "github", "id": "GitHub.cli", "source": "winget", "command": "gh.exe", "minimumVersion": "2.0.0", "versionArguments": ["--version"] },
+    { "name": "node", "id": "OpenJS.NodeJS.LTS", "source": "winget", "command": "node.exe", "minimumVersion": "20.0.0", "versionArguments": ["--version"] },
+    { "name": "codex", "id": "@openai/codex", "source": "npm", "command": "codex.cmd", "minimumVersion": "0.1.0", "versionArguments": ["--version"], "requires": ["node"] },
+    { "name": "claude", "id": "Anthropic.ClaudeCode", "source": "winget", "command": "claude.exe", "minimumVersion": "2.0.0", "versionArguments": ["--version"], "requires": ["git"] },
+    { "name": "vscode", "id": "Microsoft.VisualStudioCode", "source": "winget", "command": "code.cmd", "minimumVersion": "1.0.0", "versionArguments": ["--version"] },
+    { "name": "python", "id": "Python.Python.3.14", "source": "winget", "command": "python.exe", "minimumVersion": "3.14.0", "versionArguments": ["--version"] },
+    { "name": "dotnet", "id": "Microsoft.DotNet.SDK.10", "source": "winget", "command": "dotnet.exe", "minimumVersion": "10.0.0", "versionArguments": ["--list-sdks"] },
+    { "name": "sevenzip", "id": "7zip.7zip", "source": "winget", "check": "registry", "displayNamePattern": "^7-Zip ", "minimumVersion": "24.0.0" },
+    { "name": "powertoys", "id": "Microsoft.PowerToys", "source": "winget", "check": "registry", "displayNamePattern": "^PowerToys( \\(Preview\\))?( x64)?$", "minimumVersion": "0.90.0" },
+    { "name": "everything", "id": "voidtools.Everything", "source": "winget", "check": "registry", "displayNamePattern": "^Everything [0-9]", "minimumVersion": "1.4.0" },
+    { "name": "uv", "id": "astral-sh.uv", "source": "winget", "command": "uv.exe", "minimumVersion": "0.1.0", "versionArguments": ["--version"] },
+    { "name": "ripgrep", "id": "BurntSushi.ripgrep.MSVC", "source": "winget", "command": "rg.exe", "minimumVersion": "14.0.0", "versionArguments": ["--version"] },
+    { "name": "chrome", "id": "Google.Chrome", "source": "winget", "check": "registry", "displayNamePattern": "^Google Chrome$", "minimumVersion": "100.0.0" },
+    { "name": "brave", "id": "Brave.Brave", "source": "winget", "check": "registry", "displayNamePattern": "^Brave$", "minimumVersion": "1.0.0" },
+    { "name": "wsl", "id": "Ubuntu", "source": "windows", "command": "wsl.exe", "minimumVersion": "2.0.0", "versionArguments": ["--list", "--quiet"] },
+    { "name": "docker", "id": "Docker.DockerDesktop", "source": "winget", "command": "docker.exe", "minimumVersion": "20.0.0", "versionArguments": ["--version"], "requires": ["wsl"] }
+  ]
+}
