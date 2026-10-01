@@ -1,106 +1,66 @@
 # dev-setup
 
-Install the missing essentials on a Windows development machine, then configure a reusable PowerShell and Windows Terminal workspace.
+Set up a Windows 11 development PC with one PowerShell command. It installs your tools, lets you choose which GitHub repositories to clone, and adds project-aware Codex, Claude, and terminal commands.
 
-**Preview status:** Windows 11 x64 is the initial target. Configuration and package-provider fixtures pass locally; a fresh Windows VM provisioning run is still pending. This is not yet a verified unattended laptop rebuild.
+## Set up a new PC
 
-The `core` preset includes PowerShell 7.2+, Windows Terminal, Git, GitHub CLI, and the workspace module. The `developer` preset adds Codex, Claude Code, VS Code, Node.js LTS, Python 3.14, .NET SDK 10, Docker Desktop, WSL with Ubuntu, Chrome, Brave, 7-Zip, PowerToys, Everything, uv, and ripgrep. It excludes Go, Visual Studio, SSMS, and pgAdmin. Existing compatible packages are preserved. Apply does not upgrade packages or reboot Windows.
-
-**Start from a new PC**
-
-Open Windows PowerShell on Windows 11 and paste this one command:
+Open **Windows PowerShell as Administrator** under your usual Windows account, then paste this command:
 
 ```powershell
 irm https://raw.githubusercontent.com/aneskurtovic/dev-setup/v0.3.0-preview/quickstart.ps1 | iex
 ```
 
-It downloads the tagged public release, starts the full `developer` preset, and installs missing tools. Git and PowerShell 7 are installed as part of setup. You may see installer/UAC prompts. When GitHub CLI is ready, setup asks you to sign in and choose repositories from your personal account and accessible organizations. Enter numbers/ranges, `none`, or `all`. The selection is saved locally in `%LOCALAPPDATA%\DevSetup\repositories.json`; reruns reuse it. Clones go to `%USERPROFILE%\source\repos\<owner>\<repo>`. Existing matching clones and uncommitted work are preserved. If WSL requests a restart, restart Windows and paste the **same command** again to finish.
+The command downloads the [tagged release](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.0-preview) and starts the full developer setup. You do not need to install Git or PowerShell 7 first.
 
-The command executes [quickstart.ps1](quickstart.ps1) from a pinned release tag. Review that script and the release source before running it. Organizational execution policies may still apply.
+> **Preview release:** Windows 11 x64 is the current target. Automated tests pass, but a complete install on a fresh PC has not yet been verified. Expect to handle installer prompts and possibly restart once.
 
-Apply requires WinGet/App Installer. If unavailable, install/update Microsoft's App Installer, or explicitly select the documented Microsoft repair-module route:
+Follow the prompts as setup runs:
 
-```powershell
-powershell.exe -NoProfile -File .\bootstrap.ps1 -Mode Apply -RepairWinGet
-```
+1. Approve any Windows installer prompts. Setup installs missing apps and leaves compatible installed versions alone.
+2. If asked to restart, restart Windows, open Ubuntu once if WSL was just installed, and **paste the same command again**. Setup continues with what is still missing.
+3. Sign in to GitHub when prompted. Choose repositories by entering numbers such as `1,3-5`, or enter `all` or `none`. The list includes your personal repositories and accessible organizations.
+4. Open a **new** PowerShell or Windows Terminal window when setup finishes. Sign in to Codex and Claude the first time you use them.
 
-Repair downloads `Microsoft.WinGet.Client` from PowerShell Gallery into the current user's module directory. Apply accepts the selected packages' and source's installation agreements; installers may request UAC elevation. Run as your intended account, not a different administrator account.
+Your choices are saved on this PC, so a rerun does not ask you to select repositories again. Clones go under `~/source/repos/<owner>/<repo>`; existing matching clones and their uncommitted changes are left alone. To change your selection later, see [Managing an existing setup](docs/ADVANCED.md#change-the-repository-selection).
 
-After installation, open a fresh PowerShell session:
+## What gets installed
 
-```powershell
-pwsh -NoProfile -File .\Setup.ps1 -Mode Doctor
-ai-workspace -Preview
-ai-workspace
-```
+| Area | Apps and tools |
+| --- | --- |
+| Terminal and source control | PowerShell 7, Windows Terminal, Git, GitHub CLI |
+| AI coding | Codex, Claude Code |
+| Development | VS Code, Node.js LTS, Python 3.14, .NET SDK 10, uv, ripgrep |
+| Containers | WSL with Ubuntu, Docker Desktop |
+| Everyday apps | Chrome, Brave, 7-Zip, PowerToys, Everything |
 
-The workspace opens Claude, Codex, and shell panes. `ai-workspace` starts new sessions; `ai-workspace-resume` opens each agent's saved-session picker; `ai-workspace-agents` opens each CLI's agents browser. The `developer` preset installs the agent CLIs and display configuration, but first sign-in to each service remains interactive. Missing agent CLIs in `core` produce a diagnostic in their panes; the shell remains available.
+Visual Studio, Go, SSMS, and pgAdmin are not included. The installer does not copy credentials, automatically upgrade every app, or reboot Windows for you.
 
-**Inspect, apply, update**
+## Use your workspace
 
-```powershell
-pwsh -NoProfile -File .\Setup.ps1 -Mode Plan -Json
-pwsh -NoProfile -File .\Setup.ps1 -Mode Apply
-pwsh -NoProfile -File .\Setup.ps1 -Mode Doctor -Json
-pwsh -NoProfile -File .\Setup.ps1 -Mode Update -Component git
-```
-
-Plan is the default and makes no persistent changes. It reports missing tools and configuration differences. Doctor exits nonzero unless the selected preset is ready. Update requires explicit package names and never upgrades all installed applications. For multiple names, invoke `./Setup.ps1 -Mode Update -Preset developer -Component git,github` directly within PowerShell.
-
-Apply/Update reports are stored under `%LOCALAPPDATA%\DevSetup\runs`. Reports may contain local paths; review before sharing. A restart-required result stops package processing and requests a manual restart/rerun. Setup failures do not imply that native installer changes have been rolled back.
-
-**Projects and terminal customization**
-
-Without a project registry, `ai-workspace` uses the current Git root or current directory. To register named shortcuts, create an ignored `projects.local.json` from `config/projects.example.json`:
-
-```json
-{
-  "schemaVersion": 1,
-  "projects": [
-    {
-      "command": "demo",
-      "displayName": "Demo",
-      "path": "C:\\dev\\demo",
-      "enabled": true,
-      "replaceNavigation": false,
-      "aliases": []
-    }
-  ]
-}
-```
-
-On first installation pass `Setup.ps1 -Mode Apply -ProjectsFile .\projects.local.json`. Open a new shell, then use `demo`, `demo terminal`, `demo codex`, `demo claude`, `demo ai-workspace`, `demo ai-workspace-resume`, or `demo ai-workspace-agents`. `democc` opens the same full-window Claude profile as `demo claude`; `democx` does the same for Codex. The developer preset creates these project commands automatically for selected clones, using a sanitized `<owner>-<repo>` as the command name. Registry changes after installation must be applied through `-ProjectsFile`; direct edits to managed runtime files are reported as conflicts.
-
-Runtime files remain in `%LOCALAPPDATA%\TerminalDevSetup` to preserve compatibility. The three stable profile GUIDs and Terminal fragment source are unchanged. The installer sets the PowerShell workspace profile as Terminal's default, adds a managed block to user PowerShell profiles, and installs the compact shell prompt.
-
-Optional display configuration is separate from core:
+After setup, open a new PowerShell window and try:
 
 ```powershell
-pwsh -NoProfile -File .\Install.ps1 -ConfigureDisplay -Preview
-pwsh -NoProfile -File .\Install.ps1 -ConfigureDisplay
+ai-doctor                 # Check the workspace
+ai-projects               # Show commands for cloned projects
+ai-workspace              # Open Codex, Claude, and a shell for this folder
 ```
 
-This requires Node on PATH and is enabled automatically by the developer preset. It sets Ctrl+W to close the pane, creates or updates the conventional Codex `[tui]` status-line setting, and installs/wires the Claude renderer. Codex's built-in footer shows rate-limit percentages but currently does not expose a reset countdown field; use the [usage dashboard](https://learn.chatgpt.com/docs/pricing) for reset times and `/status` for remaining limits. Claude's renderer shows countdowns when its input includes reset timestamps. Existing unconventional TOML syntax may require manual reconciliation. The optional Claude mode chip appears only when an independently configured capture hook supplies it; this repository does not install that hook. Other user preferences and credentials are not copied between machines. See [Codex status-line configuration](https://learn.chatgpt.com/docs/config-file/config-reference) and [Claude status lines](https://code.claude.com/docs/en/statusline).
+| Command | Opens |
+| --- | --- |
+| `ai-workspace` | New Codex and Claude sessions beside a shell |
+| `ai-workspace-resume` | Each agent's saved-session picker |
+| `ai-workspace-agents` | Each agent's agents view |
+| `<project>` | Change this shell to a selected project |
+| `<project>cc` / `<project>cx` | Full-window Claude / Codex for that project |
+| `<project> ai-workspace` | Three-pane workspace for that project |
 
-**Preservation and rollback**
+`ai-projects` shows the actual `<project>` command names. For a selected repository named `owner/repo`, the generated command is normally `owner-repo`. Project window titles start with the project name.
 
-JSONC edits preserve comments and unrelated properties. Files are staged before replacement. Install and rollback share a lock. The installer records original backups and installed hashes, and refuses to overwrite drift in a target it would manage.
+## If setup stops
 
-```powershell
-pwsh -NoProfile -File "$env:LOCALAPPDATA\TerminalDevSetup\Uninstall.ps1" -Preview
-pwsh -NoProfile -File "$env:LOCALAPPDATA\TerminalDevSetup\Uninstall.ps1"
-```
+- **Restart requested:** Save your work, restart Windows, launch Ubuntu once if prompted, and run the same command again.
+- **WinGet missing:** Install or update Microsoft's App Installer, then rerun. An explicit repair option is documented in [Advanced setup](docs/ADVANCED.md#repair-winget).
+- **Older incompatible app or configuration conflict:** Read the status shown in the terminal and the report under `%LOCALAPPDATA%\DevSetup\runs`. Setup stops instead of replacing an incompatible installation or edited configuration automatically.
+- **Command not found after installation:** Open a new PowerShell window so Windows picks up newly installed commands.
 
-Rollback restores the original configuration baseline, not a package snapshot. It refuses subsequent edits or incomplete installation records and leaves backups available for manual recovery. Reinstall cannot silently bless user edits against an older backup. Packages installed by core are not removed.
-
-Known limitations: Terminal's own settings serialization can cause conservative reinstall conflicts; there is no automatic merge/recovery for drift or interrupted installs. Stable packaged Windows Terminal is the default target; the low-level installer accepts `-TerminalSettingsPath` for another channel/location. ARM64 and non-Windows platforms are unverified. A fresh machine may need a new shell after package installation for PATH/application registration to settle.
-
-**Validation and roadmap**
-
-```powershell
-pwsh -NoProfile -File .\tests\Invoke-Tests.ps1
-```
-
-Tests require Windows, PowerShell 7.2+, Git, Node, and Windows PowerShell 5.1. They use temporary configuration directories and mocked package installation. CI uses a resolution-only Terminal fixture when Terminal is absent; it does not install packages or prove clean-machine provisioning.
-
-See the [fresh Windows VM procedure](docs/CLEAN-MACHINE-TEST.md) and [investigation](DEV-SETUP-INVESTIGATION.md). The latter records the original findings and broader design, including work beyond the implemented core preset. Keep tokens, private keys, machine inventories, and private project lists out of commits.
+The [quickstart script](quickstart.ps1) is short and available to review before running the command. For planning without making changes, package updates, project customization, rollback, and tests, see [Advanced setup](docs/ADVANCED.md). Setup currently has [fresh-machine testing limits](docs/CLEAN-MACHINE-TEST.md).
