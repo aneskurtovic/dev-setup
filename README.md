@@ -7,10 +7,10 @@ Set up a Windows 11 development PC with one PowerShell command. It installs your
 Open **Windows PowerShell as Administrator** under your usual Windows account, then paste this command:
 
 ```powershell
-irm https://raw.githubusercontent.com/aneskurtovic/dev-setup/v0.3.0-preview/quickstart.ps1 | iex
+irm https://raw.githubusercontent.com/aneskurtovic/dev-setup/v0.3.1-preview/quickstart.ps1 | iex
 ```
 
-The command downloads the [tagged release](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.0-preview) and starts the full developer setup. You do not need to install Git or PowerShell 7 first.
+The command downloads the [tagged release](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.1-preview) and starts the full developer setup. You do not need to install Git or PowerShell 7 first.
 
 > **Preview release:** Windows 11 x64 is the current target. Automated tests pass, but a complete install on a fresh PC has not yet been verified. Expect to handle installer prompts and possibly restart once.
 

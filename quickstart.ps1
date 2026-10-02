@@ -2,7 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Plan','Apply','Doctor')][string] $Mode = 'Apply',
-    [string] $ArchiveUri = 'https://github.com/aneskurtovic/dev-setup/archive/refs/tags/v0.3.0-preview.zip'
+    [string] $ArchiveUri = 'https://github.com/aneskurtovic/dev-setup/archive/refs/tags/v0.3.1-preview.zip'
 )
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT' -or [Environment]::OSVersion.Version.Build -lt 22000) {
