@@ -1,5 +1,7 @@
 Run this gate in a disposable Windows 11 x64 VM as the intended user. GitHub Actions uses isolated fixtures and does not replace this gate.
 
+For steps 1–5 of the core preset, `tests/sandbox/Start-Sandbox.ps1` runs them unattended in Windows Sandbox against the release `quickstart.ps1` points at; results land in `test-results/sandbox/out`. Sandbox cannot survive a reboot, so the remaining steps and the developer preset still need a VM with snapshots.
+
 1. Snapshot a fresh Windows account without Git or PowerShell 7. Record Windows edition/build and processor architecture. Obtain this repository as a ZIP and extract it; Git must not be needed to obtain setup.
 2. In Windows PowerShell 5.1 run `powershell.exe -NoProfile -File .\bootstrap.ps1 -Mode Plan`. Confirm that no software, profiles, or Terminal settings were created.
 3. Run `powershell.exe -NoProfile -File .\bootstrap.ps1 -Mode Apply`. Inspect any UAC prompts. If App Installer is unavailable, test both the documented manual App Installer path and the explicit `-RepairWinGet` option on separate snapshots.
