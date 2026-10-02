@@ -25,7 +25,8 @@ function Read-WorkspaceRegistry {
         if ([string]::IsNullOrWhiteSpace($project.displayName) -or ![IO.Path]::IsPathRooted($project.path)) {
             throw "Project '$($project.command)' needs a displayName and an absolute path in '$script:RegistryPath'."
         }
-        foreach ($name in @($project.command) + @($project.aliases) + @(($project.command + 'cc'), ($project.command + 'cx'))) {
+        $entryNames = @($project.command) + @($project.aliases)
+        foreach ($name in $entryNames + @($entryNames | ForEach-Object { ($_ + 'cc'), ($_ + 'cx') })) {
             if ($name -notmatch '^[a-z][a-z0-9-]*$' -or $names.ContainsKey($name)) {
                 throw "Invalid or duplicate project command '$name' in '$script:RegistryPath'."
             }
@@ -245,8 +246,8 @@ foreach ($project in Read-WorkspaceRegistry) {
         Set-Item -Path "Function:script:$name" -Value ([scriptblock]::Create($body))
         $exported += $name
     }
-    foreach ($shortcut in @(@{Suffix='cc';Action='claude'}, @{Suffix='cx';Action='codex'})) {
-        $name = $project.command + $shortcut.Suffix
+    foreach ($shortcut in @(foreach ($entry in @($project.command) + @($project.aliases)) { @{Name=$entry + 'cc';Action='claude'}, @{Name=$entry + 'cx';Action='codex'} })) {
+        $name = $shortcut.Name
         $existing = Get-Command $name -ErrorAction SilentlyContinue
         if ($existing -and $existing.ModuleName -ne 'TerminalWorkspace') {
             if (!$project.replaceNavigation -or $existing.CommandType -ne 'Function') {

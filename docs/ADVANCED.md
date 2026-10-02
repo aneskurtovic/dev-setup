@@ -67,7 +67,7 @@ Apply it from the checkout and open a new shell:
 pwsh -NoProfile -File ./Setup.ps1 -Mode Apply -Preset developer -ProjectsFile ./projects.local.json
 ```
 
-`demo` changes the current shell to that project. `demo terminal`, `demo codex`, and `demo claude` open single windows; `democc` and `democx` are full-window Claude and Codex shortcuts. `demo ai-workspace`, `demo ai-workspace-resume`, and `demo ai-workspace-agents` open project workspaces. Add `-Preview` to a workspace command to inspect its launch without opening a window. Registry changes after installation must go through `-ProjectsFile`; editing managed runtime files directly can produce a conflict.
+`demo` changes the current shell to that project. `demo terminal`, `demo codex`, and `demo claude` open single windows; `democc` and `democx` are full-window Claude and Codex shortcuts, and each alias gets the same `cc`/`cx` pair. `demo ai-workspace`, `demo ai-workspace-resume`, and `demo ai-workspace-agents` open project workspaces. Add `-Preview` to a workspace command to inspect its launch without opening a window. Registry changes after installation must go through `-ProjectsFile`; editing managed runtime files directly can produce a conflict.
 
 Runtime files remain under `%LOCALAPPDATA%\TerminalDevSetup`. The installer adds a managed block to user PowerShell profiles, sets the workspace profile as Windows Terminal's default, and installs the compact shell prompt.
 

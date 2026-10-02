@@ -33,9 +33,11 @@ try {
     ) }
     Write-Json $registry $registryData
     function global:workspace-fixturecc { 'old shortcut' }
+    function global:fixture-aliascc { 'old alias shortcut' }
     $modulePath = Join-Path $repo 'powershell/TerminalWorkspace.psm1'
     Import-Module $modulePath -ArgumentList $registry -Force -DisableNameChecking
     Assert ((workspace-fixturecc -Preview).Action -eq 'claude') 'Opt-in shortcut replaces a legacy project function'
+    Assert ((fixture-aliascc -Preview).Action -eq 'claude') 'Opt-in alias shortcut replaces a legacy alias function'
     Assert ((Resolve-AiProjectRoot $nested) -eq $projectRoot) 'Nested Git directory resolves to root, including Unicode and punctuation'
     Assert ((Resolve-AiProjectRoot $plain) -eq $plain) 'Non-Git directory falls back to current folder'
     $previousPath = $env:PATH
@@ -102,6 +104,8 @@ try {
         }
         Assert ((workspace-fixturecc -Preview).Action -eq 'claude') 'Project cc shortcut opens the Claude profile'
         Assert ((workspace-fixturecx -Preview).Action -eq 'codex') 'Project cx shortcut opens the Codex profile'
+        Assert ((fixture-aliascc -Preview).Action -eq 'claude') 'Alias cc shortcut opens the Claude profile'
+        Assert ((fixture-aliascx -Preview).Action -eq 'codex') 'Alias cx shortcut opens the Codex profile'
         Assert ((workspace-fixture ai-workspace-resume -Preview).Action -eq 'ai-workspace-resume') 'Project dispatcher opens resume workspace'
         Assert ((workspace-fixture ai-workspace-agents -Preview).Action -eq 'ai-workspace-agents') 'Project dispatcher opens agents workspace'
         Assert-Throws { workspace-fixture wat } 'Unknown.*action' 'Unknown actions are rejected'
