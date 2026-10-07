@@ -10,6 +10,7 @@ Copy-Item "$repo/manifests/core.json" "$scratch/manifests"
 Copy-Item "$repo/manifests/developer.json" "$scratch/manifests"
 @'
 function Read-CoreManifest($Path) { (Get-Content $Path -Raw | ConvertFrom-Json).packages }
+function Update-ProcessPath {}
 function Get-CorePackageState($Package) {
     $status = if (Test-Path "$PSScriptRoot/$($Package.name).incompatible") {'Incompatible'} elseif (Test-Path "$PSScriptRoot/$($Package.name).installed") {'Ready'} else {'Missing'}
     [pscustomobject]@{Name=$Package.name;Status=$status;Version='1.0';Detail='fixture'}
@@ -21,7 +22,7 @@ function Install-CorePackage($Package,[switch]$Update) {
     Set-Content "$PSScriptRoot/$($Package.name).installed" 'fixture'
     Get-CorePackageState $Package
 }
-Export-ModuleMember -Function Read-CoreManifest,Get-CorePackageState,Install-CorePackage
+Export-ModuleMember -Function Read-CoreManifest,Update-ProcessPath,Get-CorePackageState,Install-CorePackage
 '@ | Set-Content "$scratch/powershell/DevSetup.psm1"
 @'
 function Get-RepositoryInventory { @([pscustomobject]@{NameWithOwner='alice/alpha';Owner='alice';Name='alpha'}) }

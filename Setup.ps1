@@ -18,6 +18,7 @@ $journalPath = $null
 try {
 if (!$IsWindows -or [Environment]::OSVersion.Version.Build -lt 22000) { throw 'This version targets Windows 11. Other platforms are not supported yet.' }
 Import-Module (Join-Path $PSScriptRoot 'powershell/DevSetup.psm1') -Force
+Update-ProcessPath
 if ($Preset -eq 'developer') { Import-Module (Join-Path $PSScriptRoot 'powershell/RepositorySetup.psm1') -Force }
 . (Join-Path $PSScriptRoot 'powershell/ConfigEditing.ps1')
 $packages = @(Read-CoreManifest (Join-Path $PSScriptRoot "manifests/$Preset.json"))
