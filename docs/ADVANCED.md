@@ -11,7 +11,7 @@ cd dev-setup
 
 ## Inspect or rerun setup
 
-The default `Setup.ps1` mode is `Plan`, which makes no persistent changes. Use `-Preset developer` for the full app list; `core` only includes PowerShell 7, Windows Terminal, Git, GitHub CLI, and the workspace.
+The default `Setup.ps1` mode is `Plan`, which makes no persistent changes. Every mode refreshes its process PATH from the current machine and user environment before checking packages; an older terminal can therefore discover tools just installed by another process. Use `-Preset developer` for the full app list; `core` only includes PowerShell 7, Windows Terminal, Git, GitHub CLI, and the workspace.
 
 ```powershell
 pwsh -NoProfile -File ./Setup.ps1 -Mode Plan -Preset developer -Json
@@ -74,6 +74,22 @@ pwsh -NoProfile -File ./Setup.ps1 -Mode Apply -Preset developer -ProjectsFile ./
 `demo` changes the current shell to that project. `demo terminal`, `demo codex`, and `demo claude` open single windows; `democc` and `democx` are full-window Claude and Codex shortcuts, and each alias gets the same `cc`/`cx` pair. `demo ai-workspace`, `demo ai-workspace-resume`, and `demo ai-workspace-agents` open project workspaces. Add `-Preview` to a workspace command to inspect its launch without opening a window. Registry changes after installation must go through `-ProjectsFile`; editing managed runtime files directly can produce a conflict.
 
 Runtime files remain under `%LOCALAPPDATA%\TerminalDevSetup`. The installer adds a managed block to user PowerShell profiles, sets the workspace profile as Windows Terminal's default, and installs the compact shell prompt.
+
+## PowerShell profiles and shortcuts
+
+Setup configures `PowerShell/Microsoft.PowerShell_profile.ps1` and `WindowsPowerShell/Microsoft.PowerShell_profile.ps1` under the Windows Documents folder. Each profile imports the installed workspace module and prompt. Both PowerShell 7 and Windows PowerShell 5.1 are supported; `-NoProfile` deliberately skips this automatic loading.
+
+Open a new terminal after setup. To reload the profile in the current shell instead:
+
+```powershell
+. $PROFILE
+ai-doctor
+ai-projects
+```
+
+Each enabled project has a navigation function and `cc`/`cx` launch functions. For example, selecting `owner/repo` normally generates `owner-repo`, `owner-repocc`, and `owner-repocx`. The `cc` function launches Claude and `cx` launches Codex. `owner-repo ai-workspace` opens the project's three-pane workspace. Shorter names can be configured through the `aliases` array in a custom project registry; automatic selection leaves that array empty.
+
+Use `owner-repocc -Preview` or `owner-repo ai-workspace -Preview` to inspect the resolved launch without opening agent windows. A successful preview verifies arguments and project paths; the first actual agent launch may still require sign-in. Windows Terminal includes `Dev Codex`, `Dev Claude`, and `Dev PowerShell` profiles, with the last as its default. The developer preset also binds Ctrl+W to close the current pane.
 
 ## Display configuration
 

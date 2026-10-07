@@ -1,5 +1,7 @@
 **dev-setup investigation — 2026-10-01**
 
+> Historical investigation: the findings and proposed commands below describe the repository before implementation. For current installation instructions, use [README.md](README.md); for the current handoff and verified results, see [docs/HANDOFF.md](docs/HANDOFF.md) and [docs/LAPTOP-VERIFICATION.md](docs/LAPTOP-VERIFICATION.md).
+
 Recommendation: evolve this folder into a Windows-first `dev-setup` repository with a small bootstrap, a curated package manifest, and independent configuration modules. Keep the existing terminal workspace as its first module. Make the default operation install missing requirements and reconcile explicitly managed settings; make upgrades a separate operation.
 
 This is an investigation and implementation proposal. The proposed commands and directory layout below do not exist yet. The current installer was not applied to the real user configuration during this investigation. Windows-first is an assumption based on the existing implementation; additional operating systems need separate acceptance criteria.

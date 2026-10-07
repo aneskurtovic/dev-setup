@@ -14,10 +14,12 @@ The command downloads the [tagged release](https://github.com/aneskurtovic/dev-s
 
 > **Preview release:** Windows 11 x64 is the current target. Automated tests pass, but a complete install on a fresh PC has not yet been verified. Expect to handle installer prompts and possibly restart once.
 
+The published command completed successfully on an existing Windows 11 laptop, including WSL 2, a real Docker container, and PowerShell profiles and project shortcuts. See the [verified results and remaining limits](docs/LAPTOP-VERIFICATION.md).
+
 Follow the prompts as setup runs:
 
 1. Approve any Windows installer prompts. Setup installs missing apps and leaves compatible installed versions alone.
-2. If asked to restart, restart Windows, open Ubuntu once if WSL was just installed, and **paste the same command again**. Setup continues with what is still missing.
+2. If asked to restart, restart Windows and **paste the same command again**. After Ubuntu is first installed, open it once and create your Linux username and password, even if no restart was needed. Setup continues with what is still missing.
 3. Sign in to GitHub when prompted. Choose repositories by entering numbers such as `1,3-5`, or enter `all` or `none`. The list includes your personal repositories and accessible organizations.
 4. Open a **new** PowerShell or Windows Terminal window when setup finishes. Sign in to Codex and Claude the first time you use them.
 
@@ -56,12 +58,14 @@ ai-workspace              # Open Codex, Claude, and a shell for this folder
 
 `ai-projects` shows the actual `<project>` command names. For a selected repository named `owner/repo`, the generated command is normally `owner-repo`. Project window titles start with the project name.
 
+Both PowerShell 7 and Windows PowerShell 5.1 user profiles load the workspace commands and Git-aware prompt. Existing terminal sessions need a new window or a [profile reload](docs/ADVANCED.md#powershell-profiles-and-shortcuts).
+
 ## If setup stops
 
 - **Restart requested:** Save your work, restart Windows, launch Ubuntu once if prompted, and run the same command again.
 - **WinGet missing:** Install or update Microsoft's App Installer, then rerun. An explicit repair option is documented in [Advanced setup](docs/ADVANCED.md#repair-winget).
 - **Older incompatible app or configuration conflict:** Follow the recovery command shown in the terminal and review the report under `%LOCALAPPDATA%\DevSetup\runs`. Setup preserves existing installations and edited configuration.
-- **Command not found after installation:** Open a new PowerShell window so Windows picks up newly installed commands.
+- **Command not found after installation:** Open a new PowerShell window to load the installed profile and commands. Setup refreshes its own PATH before checking packages, so rerunning setup from an older shell also sees newly installed tools.
 
 Failures retain completed changes and produce a nonzero exit status. Independent package checks continue; dependencies and workspace configuration are blocked until their prerequisites pass. Quickstart prints concise recovery guidance and leaves your interactive shell open. Restart instructions appear only when an installer reports a restart requirement.
 

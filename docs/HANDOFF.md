@@ -1,39 +1,39 @@
-# Handoff — 2026-10-02
+# Handoff - 2026-10-07
 
 ## Current state
 
-- **Repository:** this public repo is the only one. The private archive was deleted; its history was not carried over. Public history starts at `84be880` (initial public release).
-- **Latest release:** `v0.3.1-preview` (pre-release). The README's one-line command and `quickstart.ps1`'s `ArchiveUri` both point at it.
-- **CI:** `Validate` passes on `main`. `actions/checkout` v7.0.1 and `actions/setup-node` v7.0.0 are pinned by commit SHA and run on Node 24.
-- **Tests:** `pwsh -NoProfile -File .\tests\Invoke-Tests.ps1` passes from native PowerShell. From Git Bash, it fails on the Unicode fixture path because the temp path gets forward slashes. That's an environment problem, not a code problem.
+- Latest published release: [v0.3.2-preview](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.2-preview), pinned by both the README command and `quickstart.ps1`. Its implementation commit is `069eebd9cbd39541e0b0ac6e413a061aecdf862c`; later documentation-only commits can exist on `main` without moving this tag.
+- The real public quickstart completed on the Windows 11 laptop with exit code 0: all 19 packages ready, selected repositories ready, workspace ready, and no pending workspace changes.
+- Eight selected existing clones were preserved at their original paths. No repositories were cloned or moved. Selection is saved under `%LOCALAPPDATA%\DevSetup`.
+- Ubuntu runs under WSL 2; the user completed its personal account setup. Docker Desktop runs, and a real `hello-world` container succeeded.
+- [Main CI](https://github.com/aneskurtovic/dev-setup/actions/runs/37687732340) and [release-tag CI](https://github.com/aneskurtovic/dev-setup/actions/runs/37687883165) passed for the release commit. The complete local regression suite passed; orchestration checks were repeated after the final PATH refresh fix.
+- Fresh PowerShell 7 and Windows PowerShell 5.1 profiles automatically loaded the workspace commands and Git prompt. Navigation and Claude/Codex/workspace launch previews passed for all eight projects. Full interactive agent operation was not checked in every project.
 
-## Changed in this session
+See [LAPTOP-VERIFICATION.md](LAPTOP-VERIFICATION.md) for evidence and its limits, [README.md](../README.md) for installation and daily commands, and [ADVANCED.md](ADVANCED.md) for customization and recovery.
 
-- **Alias shortcuts** (`f6d74d7`): each project alias now gets its own `cc`/`cx` pair, not only the main command. These names are validated for collisions and replace legacy profile functions when `replaceNavigation` is true. Covered by three new assertions in `tests/Test-Workspace.ps1`.
-- **CI actions** (`d449e70`): moved off the Node 20 actions.
-- **Release** (`d669376`): `v0.3.1-preview`.
-- **Sandbox runner**: `tests/sandbox/Start-Sandbox.ps1` and `tests/sandbox/run-in-sandbox.ps1` (see below).
+## Implemented fixes
 
-## Next: clean-machine test in Windows Sandbox
+- Select a single executable consistently when PATH contains multiple WSL, PowerShell, WinGet, Git, or GitHub CLI matches.
+- Refresh process PATH before every setup check and find standalone ripgrep behind bundled copies.
+- Reuse matching existing clones in either supported directory layout; generated shortcuts use their verified paths.
+- Retain package failures and installer diagnostics in structured reports, continue independent checks, block dependencies, and show usable recovery commands.
+- Keep inline quickstart failures concise without closing the user's shell. Report restart requirements only when an installer returns one.
+- Accept known Terminal serialization and generated registrations while protecting unrelated edits and retaining original backups.
 
-The fresh-machine gate in [CLEAN-MACHINE-TEST.md](CLEAN-MACHINE-TEST.md) has still never been run, and the release notes say so.
+Project command names are generated as `owner-repo`, with `cc`/`cx` suffixes. Shorter aliases require a custom project registry; automatic selection leaves aliases empty. Runtime files and original backups remain under `%LOCALAPPDATA%\TerminalDevSetup`.
 
-1. Once, as administrator: `Enable-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM -All`, then restart.
-2. As your normal user: `powershell -NoProfile -File .\tests\sandbox\Start-Sandbox.ps1`
-3. Wait for `test-results\sandbox\out\DONE`, then read `summary.json` (per-step status), `run.log` (full transcript), `doctor.json` and `plan-after.json`.
+## Remaining acceptance work
 
-The runner covers steps 1–5 of the core preset unattended:
-- Downloads the release ZIP, so Git isn't needed.
-- Plan, with a check that it creates nothing.
-- Apply with `-RepairWinGet`, because the sandbox has no winget.
-- Doctor, then a second Plan that must be clean.
-- `ai-doctor` and `ai-workspace -Preview`.
+The fresh-machine and restart/resume gate in [CLEAN-MACHINE-TEST.md](CLEAN-MACHINE-TEST.md) remains unrun. Existing-laptop success and fixture CI do not replace it. ARM64, other operating systems, and enterprise-managed installation remain unverified.
 
-**Not covered by the sandbox:**
-- The developer preset's GitHub sign-in and repository picker. These are interactive; run the README command by hand inside the same sandbox.
-- Anything that needs a reboot (WSL, Docker). The sandbox is wiped on restart, so these still need a Hyper-V VM with checkpoints.
+On a host supporting Windows Sandbox, `tests/sandbox/Start-Sandbox.ps1` exercises steps 1-5 of the core gate against the release pinned by quickstart. Enable the Sandbox feature on that host if needed, then run:
 
-## Other open items
+```powershell
+powershell -NoProfile -File .\tests\sandbox\Start-Sandbox.ps1
+```
 
-- **Release pins:** a new release must bump both the README command and `quickstart.ps1`'s `ArchiveUri`. The sandbox runner reads the latter automatically.
-- **Known limitation:** Terminal re-serialises `settings.json`, which can make a reinstall report a conservative drift conflict. See README "Known limitations".
+Inspect `test-results/sandbox/out/DONE`, `summary.json`, `run.log`, `doctor.json`, and `plan-after.json`. Sandbox is discarded on restart; use a persistent disposable VM with snapshots for WSL/restart testing and the remaining developer-preset interactions.
+
+## Release maintenance
+
+New implementation releases must update both the README command and quickstart archive pin, pass CI, and verify the published command. Keep completed local, CI, publication, and acceptance gates distinct. Preserve existing release tags. `DEV-SETUP-INVESTIGATION.md` is a historical proposal, not current installation guidance.
