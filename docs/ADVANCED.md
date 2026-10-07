@@ -27,6 +27,8 @@ pwsh -NoProfile -File ./Setup.ps1 -Mode Doctor -Preset developer -Json
 
 Apply and Update write reports to `%LOCALAPPDATA%\DevSetup\runs`. Those reports may contain local paths; review them before sharing. A restart-required result stops package processing so you can restart and rerun. Setup does not roll back changes made by native installers.
 
+Package failures are recorded as `Failed` with installer diagnostics. Setup continues independent package checks and marks dependent packages `Blocked`. Incompatible versions print a targeted update command that also works without a checkout. Configuration stays blocked until all packages are ready. `NeedsAttention` requires the displayed initialization or repair step; it does not imply a restart. Reports include recovery steps and their own path. JSON mode keeps standard output machine-readable. Quickstart preserves the child exit code when run as a file; when piped into `iex`, it sets `$LASTEXITCODE`, prints a warning, and keeps the shell open.
+
 ## Change the repository selection
 
 The first developer Apply asks you to sign in to GitHub and select repositories from your personal account and accessible organizations. Enter several numbers or ranges (for example, `1,3-5`), `all`, or `none`. The selection is saved in `%LOCALAPPDATA%\DevSetup\repositories.json` and reused on later runs.
@@ -38,6 +40,8 @@ pwsh -NoProfile -File ./Setup.ps1 -Mode Apply -Preset developer -ChooseRepositor
 ```
 
 For an automated selection, use `-RepositoriesFile` with a JSON file containing `{"schemaVersion":1,"repositories":["owner/repo"]}`. The file is checked against repositories visible to the signed-in account. Clones use `%USERPROFILE%\source\repos\<owner>\<repo>` by default; `-ProjectRoot` changes that root. Existing matching clones, including dirty ones, are preserved. A destination with a different `origin` is reported as a conflict, not overwritten.
+
+Matching older clones at `<ProjectRoot>/<repo>` are reused when the canonical `<owner>/<repo>` destination is absent. Their verified paths are used in generated project commands. Setup does not move existing clones or follow directory junctions when choosing a destination.
 
 ## Customize project commands
 
@@ -101,7 +105,7 @@ pwsh -NoProfile -File "$env:LOCALAPPDATA\TerminalDevSetup\Uninstall.ps1" -Previe
 pwsh -NoProfile -File "$env:LOCALAPPDATA\TerminalDevSetup\Uninstall.ps1"
 ```
 
-Rollback restores the original workspace configuration baseline; it does not uninstall packages or restore a package snapshot. It refuses subsequent edits or incomplete installation records and leaves backups for manual recovery. Windows Terminal may reserialize its settings, which can cause a conservative reinstall conflict. ARM64 and non-Windows platforms are unverified.
+Rollback restores the original workspace configuration baseline; it does not uninstall packages or restore a package snapshot. It refuses subsequent edits or incomplete installation records and leaves backups for manual recovery. Known Windows Terminal formatting, uniquely identified action/keybinding reordering, and unmodified generated workspace/Ubuntu profile registrations are accepted without rewriting them. Other settings changes remain protected. ARM64 and non-Windows platforms are unverified.
 
 ## Validate a checkout
 

@@ -11,10 +11,13 @@ Copy-Item "$repo/manifests/developer.json" "$scratch/manifests"
 @'
 function Read-CoreManifest($Path) { (Get-Content $Path -Raw | ConvertFrom-Json).packages }
 function Get-CorePackageState($Package) {
-    [pscustomobject]@{Name=$Package.name; Status=if (Test-Path "$PSScriptRoot/$($Package.name).installed") {'Ready'} else {'Missing'};Version='1.0';Detail='fixture'}
+    $status = if (Test-Path "$PSScriptRoot/$($Package.name).incompatible") {'Incompatible'} elseif (Test-Path "$PSScriptRoot/$($Package.name).installed") {'Ready'} else {'Missing'}
+    [pscustomobject]@{Name=$Package.name;Status=$status;Version='1.0';Detail='fixture'}
 }
 function Install-CorePackage($Package,[switch]$Update) {
     Add-Content "$PSScriptRoot/install-calls.txt" $Package.name
+    if (Test-Path "$PSScriptRoot/$($Package.name).fail") { throw 'fixture installer failed with diagnostics' }
+    if (Test-Path "$PSScriptRoot/$($Package.name).restart") { return [pscustomobject]@{Name=$Package.name;Status='NeedsRestart';Version=$null;Detail='Restart Windows, then rerun Apply.'} }
     Set-Content "$PSScriptRoot/$($Package.name).installed" 'fixture'
     Get-CorePackageState $Package
 }
@@ -24,7 +27,8 @@ Export-ModuleMember -Function Read-CoreManifest,Get-CorePackageState,Install-Cor
 function Get-RepositoryInventory { @([pscustomobject]@{NameWithOwner='alice/alpha';Owner='alice';Name='alpha'}) }
 function Read-RepositorySelection($Path,$Inventory) { @((Get-Content $Path -Raw | ConvertFrom-Json).repositories) }
 function Get-RepositoryState($NameWithOwner,$Root) {
-    [pscustomobject]@{Repository=$NameWithOwner;Status=if (Test-Path "$Root/repo-ready") {'Ready'} else {'Missing'};Path="$Root/alice/alpha";Detail='fixture'}
+    $path = if (Test-Path "$PSScriptRoot/repo-path.txt") { (Get-Content "$PSScriptRoot/repo-path.txt" -Raw).Trim() } else { Join-Path $Root 'alice/alpha' }
+    [pscustomobject]@{Repository=$NameWithOwner;Status=if (Test-Path "$Root/repo-ready") {'Ready'} else {'Missing'};Path=$path;Detail='fixture'}
 }
 function Install-SelectedRepositories($Names,$Root) {
     $null=New-Item -ItemType Directory -Path $Root -Force
@@ -69,4 +73,27 @@ $developerApply = $out | ConvertFrom-Json
 Assert ($LASTEXITCODE -eq 0 -and $developerApply.ready -and $developerApply.repositories.Status -eq 'Ready') 'Developer Apply installs and clones selected repositories'
 $projectRegistry = Get-Content "$developerState/projects.json" -Raw | ConvertFrom-Json
 Assert ($projectRegistry.projects[0].command -eq 'alice-alpha' -and $projectRegistry.projects[0].path -eq (Join-Path $cloneRoot 'alice/alpha')) 'Selected clone creates a project command at its owner/repo path'
+$flatClone = Join-Path $cloneRoot 'alpha'
+Set-Content "$scratch/powershell/repo-path.txt" $flatClone
+$out = & pwsh -NoProfile -File "$scratch/Setup.ps1" -Mode Apply -Preset developer -ProjectRoot $cloneRoot -StateRoot $developerState -Json
+$projectRegistry = Get-Content "$developerState/projects.json" -Raw | ConvertFrom-Json
+Assert ($LASTEXITCODE -eq 0 -and $projectRegistry.projects[0].path -eq $flatClone) 'Project commands use the verified existing clone path'
+# A package failure must leave a useful report and still inspect independent packages.
+Remove-Item "$scratch/powershell/git.installed"
+Set-Content "$scratch/powershell/git.fail" 'fixture'
+$failed = Invoke-Fixture Apply
+Assert ($failed.Code -eq 1 -and !$failed.Report.ready -and @($failed.Report.packages).Count -eq 4) 'Failed package keeps a nonzero exit and a complete independent package report'
+Assert (($failed.Report.packages | Where-Object Name -EQ git).Status -eq 'Failed' -and ($failed.Report.manualSteps -join ' ') -match 'fixture installer failed with diagnostics') 'Failed package includes actionable diagnostics and recovery steps'
+Assert ($failed.Report.workspace.Status -eq 'Blocked' -and (Test-Path $failed.Report.reportPath)) 'Failed Apply blocks configuration and retains its JSON run report'
+$out = & pwsh -NoProfile -File "$scratch/Setup.ps1" -Mode Apply -Preset developer -ProjectRoot $cloneRoot -StateRoot $developerState -Json
+$failedDeveloper = $out | ConvertFrom-Json
+Assert ($LASTEXITCODE -eq 1 -and ($failedDeveloper.packages | Where-Object Name -EQ claude).Status -eq 'Blocked') 'Dependent packages are blocked after a dependency fails'
+Remove-Item "$scratch/powershell/git.fail"
+Set-Content "$scratch/powershell/git.incompatible" 'fixture'
+$incompatible = Invoke-Fixture Apply
+Assert (($incompatible.Report.manualSteps -join ' ') -match 'winget upgrade --id Git.Git --exact' -and ($incompatible.Report.packages | Where-Object Name -EQ git).Status -eq 'Incompatible') 'Incompatible packages give an update command usable outside a checkout'
+Remove-Item "$scratch/powershell/git.incompatible"
+Set-Content "$scratch/powershell/git.restart" 'fixture'
+$restart = Invoke-Fixture Apply
+Assert ($restart.Code -eq 1 -and ($restart.Report.packages | Select-Object -Last 1).Status -eq 'NeedsRestart' -and @($restart.Report.packages).Count -eq 3) 'Restart-required installation stops subsequent package processing'
 Write-Host "All $script:passed orchestration checks passed. Fixtures retained: $scratch"

@@ -2,7 +2,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 function Invoke-GitHub([string[]] $Arguments) {
-    $gh = (Get-Command gh.exe -CommandType Application -ErrorAction Stop).Source
+    $gh = (Get-Command gh.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $result = & $gh @Arguments 2>&1
     if ($LASTEXITCODE -ne 0) { throw "GitHub CLI could not list repositories. Run 'gh auth login' and verify organization access." }
     return ($result -join "`n")
@@ -88,6 +88,17 @@ function Get-RepositoryState([string] $NameWithOwner, [string] $Root) {
         $ownerItem = Get-Item -LiteralPath $ownerPath -Force
         if (!$ownerItem.PSIsContainer -or ($ownerItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return [pscustomobject]@{Repository=$NameWithOwner;Status='Conflict';Path=$destination;Detail='Owner directory is not a normal directory'} }
     }
+    # Reuse matching clones made before the owner/repo layout was introduced.
+    $flatPath = Join-Path $Root $parts[1]
+    if (!(Test-Path -LiteralPath $destination) -and (Test-Path -LiteralPath $flatPath)) {
+        $flatItem = Get-Item -LiteralPath $flatPath -Force
+        if ($flatItem.PSIsContainer -and !($flatItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            $git = Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
+            $remote = & $git.Source -C $flatPath remote get-url origin 2>$null
+            $normalized = ([string]$remote).Trim() -replace '^git@github\.com:', 'https://github.com/' -replace '\.git$', ''
+            if ($LASTEXITCODE -eq 0 -and $normalized -ieq "https://github.com/$NameWithOwner") { $destination = $flatPath }
+        }
+    }
     if (!(Test-Path -LiteralPath $destination)) { return [pscustomobject]@{Repository=$NameWithOwner;Status='Missing';Path=$destination;Detail='Clone'} }
     $item = Get-Item -LiteralPath $destination -Force
     if (!$item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return [pscustomobject]@{Repository=$NameWithOwner;Status='Conflict';Path=$destination;Detail='Destination is not a normal directory'} }
@@ -100,7 +111,7 @@ function Get-RepositoryState([string] $NameWithOwner, [string] $Root) {
 }
 
 function Install-SelectedRepositories([string[]] $Names, [string] $Root) {
-    $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop).Source
+    $git = (Get-Command git.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $states = @()
     foreach ($name in $Names) {
         $state = Get-RepositoryState $name $Root

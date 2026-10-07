@@ -7,10 +7,10 @@ Set up a Windows 11 development PC with one PowerShell command. It installs your
 Open **Windows PowerShell as Administrator** under your usual Windows account, then paste this command:
 
 ```powershell
-irm https://raw.githubusercontent.com/aneskurtovic/dev-setup/v0.3.1-preview/quickstart.ps1 | iex
+irm https://raw.githubusercontent.com/aneskurtovic/dev-setup/v0.3.2-preview/quickstart.ps1 | iex
 ```
 
-The command downloads the [tagged release](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.1-preview) and starts the full developer setup. You do not need to install Git or PowerShell 7 first.
+The command downloads the [tagged release](https://github.com/aneskurtovic/dev-setup/releases/tag/v0.3.2-preview) and starts the full developer setup. You do not need to install Git or PowerShell 7 first.
 
 > **Preview release:** Windows 11 x64 is the current target. Automated tests pass, but a complete install on a fresh PC has not yet been verified. Expect to handle installer prompts and possibly restart once.
 
@@ -21,7 +21,7 @@ Follow the prompts as setup runs:
 3. Sign in to GitHub when prompted. Choose repositories by entering numbers such as `1,3-5`, or enter `all` or `none`. The list includes your personal repositories and accessible organizations.
 4. Open a **new** PowerShell or Windows Terminal window when setup finishes. Sign in to Codex and Claude the first time you use them.
 
-Your choices are saved on this PC, so a rerun does not ask you to select repositories again. Clones go under `~/source/repos/<owner>/<repo>`; existing matching clones and their uncommitted changes are left alone. To change your selection later, see [Managing an existing setup](docs/ADVANCED.md#change-the-repository-selection).
+Your choices are saved on this PC, so a rerun does not ask you to select repositories again. New clones go under `~/source/repos/<owner>/<repo>`. Matching existing clones there or directly under `~/source/repos/<repo>` are marked as existing and reused, including their uncommitted changes. To change your selection later, see [Managing an existing setup](docs/ADVANCED.md#change-the-repository-selection).
 
 ## What gets installed
 
@@ -60,7 +60,9 @@ ai-workspace              # Open Codex, Claude, and a shell for this folder
 
 - **Restart requested:** Save your work, restart Windows, launch Ubuntu once if prompted, and run the same command again.
 - **WinGet missing:** Install or update Microsoft's App Installer, then rerun. An explicit repair option is documented in [Advanced setup](docs/ADVANCED.md#repair-winget).
-- **Older incompatible app or configuration conflict:** Read the status shown in the terminal and the report under `%LOCALAPPDATA%\DevSetup\runs`. Setup stops instead of replacing an incompatible installation or edited configuration automatically.
+- **Older incompatible app or configuration conflict:** Follow the recovery command shown in the terminal and review the report under `%LOCALAPPDATA%\DevSetup\runs`. Setup preserves existing installations and edited configuration.
 - **Command not found after installation:** Open a new PowerShell window so Windows picks up newly installed commands.
+
+Failures retain completed changes and produce a nonzero exit status. Independent package checks continue; dependencies and workspace configuration are blocked until their prerequisites pass. Quickstart prints concise recovery guidance and leaves your interactive shell open. Restart instructions appear only when an installer reports a restart requirement.
 
 The [quickstart script](quickstart.ps1) is short and available to review before running the command. For planning without making changes, package updates, project customization, rollback, and tests, see [Advanced setup](docs/ADVANCED.md). Setup currently has [fresh-machine testing limits](docs/CLEAN-MACHINE-TEST.md).

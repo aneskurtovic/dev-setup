@@ -27,6 +27,14 @@ $null = New-Item -ItemType Directory -Path $state.Path -Force
 if ((Get-RepositoryState 'alice/alpha' $root).Status -ne 'Ready') { throw 'Existing matching SSH clone was not preserved.' }
 & git -C $state.Path remote set-url origin https://github.com/team/omega.git
 if ((Get-RepositoryState 'alice/alpha' $root).Status -ne 'Conflict') { throw 'Mismatched origin was accepted.' }
+$flatPath = Join-Path $root 'legacy'
+& git init --quiet $flatPath
+& git -C $flatPath remote add origin https://github.com/alice/legacy.git
+Set-Content -LiteralPath (Join-Path $flatPath 'uncommitted.txt') 'keep this work'
+if ((Get-RepositoryState 'alice/legacy' $root).Path -ne $flatPath) { throw 'Existing matching flat clone was not reused.' }
+$states = @(Install-SelectedRepositories @('alice/legacy') $root)
+if ($states[0].Status -ne 'Ready' -or (Test-Path (Join-Path $root 'alice/legacy')) -or !(Test-Path (Join-Path $flatPath 'uncommitted.txt'))) { throw 'Flat clone or uncommitted work was not preserved.' }
+if ((Get-RepositoryState 'other/legacy' $root).Status -ne 'Missing') { throw 'Flat clone with a different owner was reused.' }
 try { $null=Get-RepositoryState '../escape' $root; throw 'Traversal was accepted.' }
 catch { if ($_.Exception.Message -eq 'Traversal was accepted.') { throw } }
 Write-Host 'Repository selection and preservation checks passed.'

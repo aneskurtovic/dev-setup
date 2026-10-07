@@ -10,6 +10,7 @@ param(
     [switch] $ChooseRepositories
 )
 $ErrorActionPreference = 'Stop'
+try {
 if ($env:OS -ne 'Windows_NT' -or [Environment]::OSVersion.Version.Build -lt 22000) { throw 'dev-setup currently targets Windows 11.' }
 function Find-PowerShell7 {
     $command = Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -25,7 +26,7 @@ function Find-PowerShell7 {
 }
 $pwshPath = Find-PowerShell7
 if ($Mode -eq 'Apply') {
-    $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue
+    $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (!$winget -and $RepairWinGet) {
         # Explicit opt-in to the Microsoft-documented PSGallery repair route.
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -34,7 +35,7 @@ if ($Mode -eq 'Apply') {
         Import-Module Microsoft.WinGet.Client
         Repair-WinGetPackageManager
         $env:PATH += ';' + [Environment]::GetEnvironmentVariable('Path','User')
-        $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue
+        $winget = Get-Command winget.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     }
     if (!$winget) { throw 'WinGet is unavailable. Install/update Microsoft App Installer, or rerun Apply with -RepairWinGet to use the Microsoft repair module.' }
     if (!$pwshPath) {
@@ -57,3 +58,7 @@ if ($RepositoriesFile) { $setupArgs += @('-RepositoriesFile',$RepositoriesFile) 
 if ($ChooseRepositories) { $setupArgs += '-ChooseRepositories' }
 & $pwshPath @setupArgs
 exit $LASTEXITCODE
+} catch {
+    Write-Warning "dev-setup bootstrap could not complete: $($_.Exception.Message)"
+    exit 1
+}

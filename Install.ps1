@@ -18,6 +18,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'powershell/ConfigEditing.ps1')
+. (Join-Path $PSScriptRoot 'powershell/TerminalSettings.ps1')
 $InstallRoot = [IO.Path]::GetFullPath($InstallRoot)
 $mutexName = 'Local\DevSetup-' + [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($InstallRoot.ToLowerInvariant())))
 $mutex = [Threading.Mutex]::new($false, $mutexName)
@@ -25,7 +26,7 @@ $ownsMutex = $false
 try {
 try { $ownsMutex = $mutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $ownsMutex = $true }
 if (!$ownsMutex) { throw 'Another workspace install or rollback is running.' }
-$pwsh = (Get-Command pwsh.exe -CommandType Application -ErrorAction Stop).Source
+$pwsh = (Get-Command pwsh.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 $null = Get-Command wt.exe -CommandType Application -ErrorAction Stop
 $settingsText = if (Test-Path -LiteralPath $TerminalSettingsPath) { [IO.File]::ReadAllText($TerminalSettingsPath) } else { '{}' }
 $settings = $settingsText | ConvertFrom-Json
@@ -43,7 +44,7 @@ Remove-Module TerminalWorkspace
 $utf8 = [Text.UTF8Encoding]::new($false)
 $utf8Bom = [Text.UTF8Encoding]::new($true)
 $writes = [ordered]@{}
-foreach ($file in @('TerminalWorkspace.psm1','Start-Pane.ps1','Workspace-Prompt.ps1')) {
+foreach ($file in @('TerminalWorkspace.psm1','Start-Pane.ps1','Workspace-Prompt.ps1','TerminalSettings.ps1')) {
     $writes[(Join-Path $InstallRoot $file)] = @{ Content = [IO.File]::ReadAllText((Join-Path $PSScriptRoot "powershell/$file")); Encoding = $utf8 }
 }
 $writes[(Join-Path $InstallRoot 'Uninstall.ps1')] = @{ Content = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Uninstall.ps1')); Encoding = $utf8 }
@@ -144,6 +145,24 @@ $manifest = if (Test-Path -LiteralPath $manifestPath) { Get-Content -LiteralPath
 foreach ($entry in $manifest.files) {
     if (!$writes.Contains($entry.path)) { continue }
     if (!$entry.installedHash -or !(Test-Path -LiteralPath $entry.path) -or (Get-FileHash -LiteralPath $entry.path).Hash -ne $entry.installedHash) {
+        if ($entry.path -eq $TerminalSettingsPath -and $entry.installedHash -and (Test-Path -LiteralPath $entry.path)) {
+            $recordedSettings = $entry.installedContent
+            # Recover the exact prior content for installations made before snapshots.
+            if (!$recordedSettings -and $entry.backup -and (Test-Path -LiteralPath $entry.backup)) {
+                $candidate = Set-JsonRootValue ([IO.File]::ReadAllText($entry.backup)) 'defaultProfile' $shellGuid
+                foreach ($withDisplay in @($false,$true)) {
+                    if ($withDisplay) {
+                        $previous = $candidate | ConvertFrom-Json
+                        $previousBindings = @($previous.keybindings | Where-Object { $null -ne $_ -and $_.keys -ne 'ctrl+w' })
+                        $previousBindings += [ordered]@{id='Terminal.ClosePane';keys='ctrl+w'}
+                        $candidate = Set-JsonRootValue $candidate 'keybindings' $previousBindings
+                    }
+                    $candidateHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($utf8.GetBytes($candidate)))
+                    if ($candidateHash -eq $entry.installedHash) { $recordedSettings = $candidate; break }
+                }
+            }
+            if ($recordedSettings -and (Test-TerminalSettingsEquivalent $recordedSettings $settingsText)) { continue }
+        }
         throw "Changed since installation or incomplete installation: $($entry.path). Reconcile with backups before reinstalling; no files changed."
     }
 }
@@ -153,6 +172,7 @@ if ($Preview) {
         $desired = [byte[]] ($write.Encoding.GetPreamble() + $write.Encoding.GetBytes($write.Content))
         $exists = Test-Path -LiteralPath $target
         $same = $exists -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($target)) -eq [Convert]::ToBase64String($desired)
+        if (!$same -and $exists -and $target -eq $TerminalSettingsPath) { $same = Test-TerminalSettingsEquivalent $write.Content ([IO.File]::ReadAllText($target)) }
         [pscustomobject]@{ Target=$target; Exists=$exists; Action=if ($same) {'Unchanged'} else {'Write'} }
     }
     return
@@ -175,6 +195,7 @@ foreach ($target in $writes.Keys) {
     $write = $writes[$target]
     $desired = [byte[]] ($write.Encoding.GetPreamble() + $write.Encoding.GetBytes($write.Content))
     $same = (Test-Path -LiteralPath $target) -and [Convert]::ToBase64String([IO.File]::ReadAllBytes($target)) -eq [Convert]::ToBase64String($desired)
+    if (!$same -and (Test-Path -LiteralPath $target) -and $target -eq $TerminalSettingsPath) { $same = Test-TerminalSettingsEquivalent $write.Content ([IO.File]::ReadAllText($target)) }
     if (!$same) {
         $null = New-Item -ItemType Directory -Path (Split-Path $target) -Force
         Write-AtomicBytes $target $desired
@@ -182,6 +203,7 @@ foreach ($target in $writes.Keys) {
     }
     $entry = $manifest.files | Where-Object { $_.path -eq $target } | Select-Object -First 1
     $entry.installedHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+    if ($target -eq $TerminalSettingsPath) { $entry['installedContent'] = [IO.File]::ReadAllText($target) }
     Write-AtomicBytes $manifestPath ($utf8.GetBytes(($manifest | ConvertTo-Json -Depth 10)))
 }
 Write-Host "Installed. Open a new PowerShell session, then run ai-doctor or ai-workspace."

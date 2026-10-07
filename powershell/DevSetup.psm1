@@ -24,7 +24,7 @@ function Read-CoreManifest([string] $Path) {
 
 function Update-ProcessPath {
     $paths = @($env:PATH) + @([Environment]::GetEnvironmentVariable('Path','Machine'), [Environment]::GetEnvironmentVariable('Path','User'))
-    $env:PATH = ($paths | Where-Object { $_ }) -join ';'
+    $env:PATH = (($paths -split ';') | Where-Object { $_ } | Select-Object -Unique) -join ';'
 }
 
 function Invoke-SetupProcess([string] $File, [string[]] $Arguments, [int] $TimeoutSeconds = 120) {
@@ -57,6 +57,13 @@ function Invoke-SetupProcess([string] $File, [string[]] $Arguments, [int] $Timeo
     } finally { $process.Dispose() }
 }
 
+function Get-SetupProcessDetail($Result) {
+    $detail = (@($Result.Output, $Result.Error) | Where-Object { ![string]::IsNullOrWhiteSpace($_) }) -join "`n"
+    $detail = $detail.Trim()
+    if ($detail.Length -gt 4000) { $detail = $detail.Substring($detail.Length - 4000) }
+    return $detail
+}
+
 function Get-CorePackageState($Package) {
     if ($Package.PSObject.Properties['check'] -and $Package.check -eq 'registry') {
         $uninstallPaths = @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')
@@ -74,11 +81,15 @@ function Get-CorePackageState($Package) {
             $listed = Invoke-SetupProcess $wsl.Source @('--list','--quiet') 15
             $names = @($listed.Output -split '\r?\n' | ForEach-Object { $_.Trim([char]0,[char]0xfeff,' ') } | Where-Object { $_ })
             if ($listed.ExitCode -eq 0 -and 'Ubuntu' -in $names) { return [pscustomobject]@{Name=$Package.name;Status='Ready';Version='2';Detail='Ubuntu WSL distribution registered'} }
-            return [pscustomobject]@{Name=$Package.name;Status='Missing';Version=$null;Detail='Ubuntu WSL distribution is not registered or WSL needs a restart'}
+            if ($listed.ExitCode -ne 0 -and $listed.Output -notmatch 'has no installed distributions') {
+                return [pscustomobject]@{Name=$Package.name;Status='Conflict';Version=$null;Detail="WSL inspection exited $($listed.ExitCode). $(Get-SetupProcessDetail $listed)"}
+            }
+            return [pscustomobject]@{Name=$Package.name;Status='Missing';Version=$null;Detail='Ubuntu WSL distribution is not registered'}
         } catch { return [pscustomobject]@{Name=$Package.name;Status='Conflict';Version=$null;Detail=$_.Exception.Message} }
     }
-    $command = Get-Command $Package.command -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($Package.name -eq 'ripgrep' -and $command -and $command.Source -match '[/\\](?:\.codex|Microsoft VS Code)[/\\]') { $command = $null }
+    $command = Get-Command $Package.command -CommandType Application -ErrorAction SilentlyContinue |
+        Where-Object { $Package.name -ne 'ripgrep' -or $_.Source -notmatch '[/\\](?:\.codex|Microsoft VS Code)[/\\]' } |
+        Select-Object -First 1
     if (!$command) { return [pscustomobject]@{ Name=$Package.name; Status='Missing'; Version=$null; Detail="Install $($Package.id)" } }
     try {
         if ($Package.name -eq 'terminal') {
@@ -92,7 +103,7 @@ function Get-CorePackageState($Package) {
         }
         $matches = [regex]::Matches([string]$raw, '\d+\.\d+\.\d+(?:\.\d+)?')
         $match = if ($Package.name -eq 'dotnet') { $matches | Sort-Object { [version]$_.Value } -Descending | Select-Object -First 1 } else { $matches | Select-Object -First 1 }
-        if (!$match.Success) { throw 'Could not determine version; verify the existing installation.' }
+        if (!$match -or !$match.Success) { throw 'Could not determine version; verify the existing installation.' }
         $version = [version]$match.Value
         $status = if ($version -ge [version]$Package.minimumVersion) { 'Ready' } else { 'Incompatible' }
         [pscustomobject]@{ Name=$Package.name; Status=$status; Version=$version.ToString(); Detail=$command.Source }
@@ -107,25 +118,30 @@ function Get-CorePackageState($Package) {
 function Install-CorePackage($Package, [switch] $Update) {
     if ($Package.source -eq 'windows') {
         if ($Update) { throw 'WSL upgrades are not automated here. Run wsl --update deliberately.' }
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
-        if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'WSL installation needs an elevated terminal under this same Windows account. Rerun Apply after elevation.' }
-        $wsl = (Get-Command wsl.exe -CommandType Application -ErrorAction Stop).Source
+        # Installing a distribution on an existing WSL platform works as the current user.
+        # WSL itself requests elevation if Windows features still need enabling.
+        $wsl = (Get-Command wsl.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
         $result = Invoke-SetupProcess $wsl @('--install','-d','Ubuntu','--no-launch') 1800
-        if ($result.ExitCode -ne 0) { throw "WSL installation exited $($result.ExitCode). Check Windows feature and virtualization requirements." }
+        if ($result.ExitCode -eq 0) {
+            $state = Get-CorePackageState $Package
+            if ($state.Status -eq 'Ready') { return $state }
+            return [pscustomobject]@{Name=$Package.name;Status='NeedsAttention';Version=$null;Detail="Ubuntu is not ready after installation. Launch Ubuntu once to finish initialization, then rerun Apply. $(Get-SetupProcessDetail $result)"}
+        } elseif ($result.ExitCode -ne 3010) {
+            throw "WSL installation exited $($result.ExitCode). $(Get-SetupProcessDetail $result)"
+        }
         return [pscustomobject]@{Name=$Package.name;Status='NeedsRestart';Version=$null;Detail='Restart Windows, launch Ubuntu once to create its user, then rerun Apply.'}
     }
     if ($Package.source -eq 'npm') {
         $npm = Get-Command npm.cmd -CommandType Application -ErrorAction Stop | Select-Object -First 1
         $args = @('install','--global',($Package.id + '@latest'))
         $result = Invoke-SetupProcess $npm.Source $args 1800
-        if ($result.ExitCode -ne 0) { throw "npm install for $($Package.id) exited $($result.ExitCode)." }
+        if ($result.ExitCode -ne 0) { throw "npm install for $($Package.id) exited $($result.ExitCode). $(Get-SetupProcessDetail $result)" }
         Update-ProcessPath
         $state = Get-CorePackageState $Package
         if ($state.Status -ne 'Ready') { throw "$($Package.name) is $($state.Status) after npm installation. Open a new shell, then rerun Doctor." }
         return $state
     }
-    $winget = Get-Command winget.exe -CommandType Application -ErrorAction Stop
+    $winget = Get-Command winget.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1
     $verb = if ($Update) { 'upgrade' } else { 'install' }
     $arguments = @($verb,'--id',$Package.id,'--exact','--source',$Package.source,'--accept-source-agreements','--accept-package-agreements','--disable-interactivity')
     if (!$Update) { $arguments += '--no-upgrade' }
@@ -137,7 +153,7 @@ function Install-CorePackage($Package, [switch] $Update) {
     }
     # Already-installed/no-update results are acceptable only if post-verification succeeds.
     if ($code -notin @(0L,0x8A15002BL,0x8A150061L,0x8A15010DL)) {
-        throw "WinGet $verb for $($Package.id) exited $($result.ExitCode). Check WinGet logs; no restart or success is assumed."
+        throw "WinGet $verb for $($Package.id) exited $($result.ExitCode). $(Get-SetupProcessDetail $result) Logs: $env:LOCALAPPDATA\Packages\Microsoft.DesktopAppInstaller_8wekyb3d8bbwe\LocalState\DiagOutputDir"
     }
     Update-ProcessPath
     $state = Get-CorePackageState $Package

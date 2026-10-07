@@ -2,9 +2,11 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Plan','Apply','Doctor')][string] $Mode = 'Apply',
-    [string] $ArchiveUri = 'https://github.com/aneskurtovic/dev-setup/archive/refs/tags/v0.3.1-preview.zip'
+    [string] $ArchiveUri = 'https://github.com/aneskurtovic/dev-setup/archive/refs/tags/v0.3.2-preview.zip'
 )
+$previousErrorActionPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Stop'
+try {
 if ($env:OS -ne 'Windows_NT' -or [Environment]::OSVersion.Version.Build -lt 22000) {
     throw 'dev-setup currently targets Windows 11.'
 }
@@ -24,4 +26,16 @@ if ($bootstraps.Count -ne 1) { throw 'The downloaded release did not contain exa
 Write-Host "Starting dev-setup $Mode from $($bootstraps[0].DirectoryName)"
 $legacyPowerShell = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
 & $legacyPowerShell -NoProfile -ExecutionPolicy Bypass -File $bootstraps[0].FullName -Mode $Mode -Preset developer
-if ($LASTEXITCODE -ne 0) { throw "dev-setup $Mode needs attention. Review the report above, then rerun the same command after resolving it or restarting Windows." }
+if ($LASTEXITCODE -ne 0) {
+    $setupExitCode = $LASTEXITCODE
+    Write-Warning "dev-setup $Mode is incomplete. Follow the recovery steps and run report above, then rerun this command."
+    if ($PSCommandPath) { exit $setupExitCode }
+    $global:LASTEXITCODE = $setupExitCode
+    return
+}
+} catch {
+    Write-Warning "dev-setup could not complete: $($_.Exception.Message)"
+    Write-Warning 'Check the download URL, network access, and installer permissions, then rerun. Completed changes are retained.'
+    if ($PSCommandPath) { exit 1 }
+    $global:LASTEXITCODE = 1
+} finally { $ErrorActionPreference = $previousErrorActionPreference }

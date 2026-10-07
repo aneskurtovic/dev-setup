@@ -12,6 +12,10 @@ param(
     [switch] $Json
 )
 $ErrorActionPreference = 'Stop'
+$report = [ordered]@{ schemaVersion=1; mode=$Mode; preset=$Preset; ready=$false; packages=@(); repositories=$null; workspace=$null; manualSteps=@(); error=$null; reportPath=$null }
+$lock = $null
+$journalPath = $null
+try {
 if (!$IsWindows -or [Environment]::OSVersion.Version.Build -lt 22000) { throw 'This version targets Windows 11. Other platforms are not supported yet.' }
 Import-Module (Join-Path $PSScriptRoot 'powershell/DevSetup.psm1') -Force
 if ($Preset -eq 'developer') { Import-Module (Join-Path $PSScriptRoot 'powershell/RepositorySetup.psm1') -Force }
@@ -30,27 +34,40 @@ if ($Component) {
 $installArgs = @{}
 if ($ProjectsFile) { $installArgs.ProjectsFile = $ProjectsFile }
 if ($Preset -eq 'developer') { $installArgs.ConfigureDisplay = $true }
-$report = [ordered]@{ schemaVersion=1; mode=$Mode; preset=$Preset; ready=$false; packages=@(); repositories=$null; workspace=$null; manualSteps=@(); error=$null }
-$lock = $null
-$journalPath = $null
-try {
     if ($Mode -in @('Apply','Update')) {
         $null = New-Item -ItemType Directory -Path $StateRoot -Force
         try { $lock = [IO.File]::Open((Join-Path $StateRoot 'setup.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
         catch { throw 'Another setup process holds the setup lock.' }
         $journalPath = Join-Path $StateRoot ('runs/' + [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N') + '.json')
+        $report.reportPath = $journalPath
     }
     foreach ($package in $packages) {
+        try {
         $state = Get-CorePackageState $package
         $dependencies = if ($package.PSObject.Properties['requires']) { @($package.requires) } else { @() }
         $unready = @($dependencies | Where-Object { $_ -notin @($report.packages | Where-Object Status -EQ 'Ready' | ForEach-Object Name) })
         if ($unready.Count) { $state = [pscustomobject]@{Name=$package.name;Status='Blocked';Version=$null;Detail=('Requires ' + ($unready -join ', '))} }
-        elseif ($Mode -eq 'Apply' -and $state.Status -eq 'Missing') { $state = Install-CorePackage $package }
+        elseif ($Mode -eq 'Apply' -and $state.Status -eq 'Missing') {
+            if (!$Json) { Write-Host "Installing $($package.name)..." }
+            $state = Install-CorePackage $package
+        }
         elseif ($Mode -eq 'Update') {
+            if (!$Json) { Write-Host "Updating $($package.name)..." }
             if ($state.Status -eq 'Missing') { $state = Install-CorePackage $package }
             else { $state = Install-CorePackage $package -Update }
         }
+        } catch {
+            $state = [pscustomobject]@{Name=$package.name;Status='Failed';Version=$null;Detail=$_.Exception.Message}
+        }
         $report.packages += $state
+        if ($state.Status -eq 'Incompatible') {
+            $updateCommand = if ($package.source -eq 'winget') { "winget upgrade --id $($package.id) --exact --source winget" }
+                elseif ($package.source -eq 'npm') { "npm install --global $($package.id)@latest" }
+                else { 'wsl --update' }
+            $report.manualSteps += "Update $($package.name) explicitly: $updateCommand, then rerun Apply."
+        } elseif ($state.Status -in @('Failed','Conflict','NeedsAttention','NeedsRestart')) {
+            $report.manualSteps += "$($package.name): $($state.Detail)"
+        }
         if ($journalPath) { Write-AtomicBytes $journalPath ([Text.Encoding]::UTF8.GetBytes(($report | ConvertTo-Json -Depth 10))) }
         if ($state.Status -eq 'NeedsRestart') { break }
     }
@@ -92,7 +109,8 @@ try {
                     $registryPath = Join-Path $StateRoot 'projects.json'
                     $usedCommands = @{}
                     $registry = @{schemaVersion=1;projects=@($selected | ForEach-Object {
-                        $parts = $_.Split('/')
+                        $repositoryName = $_
+                        $repoPath = [IO.Path]::GetFullPath(($repoStates | Where-Object Repository -EQ $repositoryName | Select-Object -First 1).Path)
                         $command = ($_.ToLowerInvariant() -replace '[^a-z0-9-]','-').Trim('-')
                         if ($command -notmatch '^[a-z]') { $command = 'repo-' + $command }
                         if ($command -in @('ai-workspace','ai-workspace-resume','ai-workspace-agents','ai-projects','ai-doctor')) { $command = 'repo-' + $command }
@@ -101,7 +119,7 @@ try {
                             $command += '-' + [Convert]::ToHexString($hash).Substring(0,8).ToLowerInvariant()
                         }
                         foreach ($name in @($command, ($command + 'cc'), ($command + 'cx'))) { $usedCommands[$name] = $true }
-                        @{command=$command;displayName=$_;path=(Join-Path (Join-Path $ProjectRoot $parts[0]) $parts[1]);enabled=$true;replaceNavigation=$false;aliases=@()}
+                        @{command=$command;displayName=$_;path=$repoPath;enabled=$true;replaceNavigation=$false;aliases=@()}
                     })} | ConvertTo-Json -Depth 6
                     if ($Mode -eq 'Apply') { Write-AtomicBytes $registryPath ([Text.Encoding]::UTF8.GetBytes($registry)) }
                     if (Test-Path -LiteralPath $registryPath) { $installArgs.ProjectsFile = $registryPath }
@@ -115,14 +133,25 @@ try {
                 }
                 $pending = @($changes | Where-Object Action -NE 'Unchanged')
                 $report.workspace = @{ Status=if ($pending.Count) {'ChangesNeeded'} else {'Ready'}; Changes=$pending }
-            } catch { $report.workspace = @{ Status='Conflict'; Detail=$_.Exception.Message } }
+            } catch {
+                $report.workspace = @{ Status='Conflict'; Detail=$_.Exception.Message }
+                $report.manualSteps += "Workspace: $($_.Exception.Message)"
+            }
         }
     }
     $report.ready = @($report.packages | Where-Object Status -NE 'Ready').Count -eq 0 -and ($Mode -eq 'Update' -or ($report.workspace.Status -eq 'Ready' -and ($Preset -eq 'core' -or $report.repositories.Status -eq 'Ready')))
-} catch { $report.error = $_.Exception.Message }
+} catch {
+    $report.error = $_.Exception.Message
+    $report.manualSteps += "Resolve this error, then rerun $Mode`: $($report.error)"
+}
 finally {
-    if ($journalPath) { Write-AtomicBytes $journalPath ([Text.Encoding]::UTF8.GetBytes(($report | ConvertTo-Json -Depth 10))) }
-    if ($lock) { $lock.Dispose() }
+    try {
+        if ($journalPath) { Write-AtomicBytes $journalPath ([Text.Encoding]::UTF8.GetBytes(($report | ConvertTo-Json -Depth 10))) }
+    } catch {
+        $report.ready = $false
+        $report.error = "Could not save the run report to '$journalPath': $($_.Exception.Message)"
+        $report.manualSteps += $report.error
+    } finally { if ($lock) { $lock.Dispose() } }
 }
 if ($Json) { $report | ConvertTo-Json -Depth 10 }
 else {
@@ -132,6 +161,10 @@ else {
     if ($report.error) { Write-Host $report.error -ForegroundColor Red }
     $report.manualSteps | ForEach-Object { Write-Host $_ }
     if ($journalPath) { Write-Host "Run report: $journalPath" }
+    if ($Mode -ne 'Plan') {
+        if ($report.ready) { Write-Host 'dev-setup completed successfully.' -ForegroundColor Green }
+        else { Write-Warning 'dev-setup is incomplete. Follow the recovery steps above and rerun. Completed changes are retained.' }
+    }
 }
 if ($report.error -or ($Mode -ne 'Plan' -and !$report.ready)) { exit 1 }
 exit 0

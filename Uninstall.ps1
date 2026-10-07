@@ -13,6 +13,8 @@ if (!$ownsMutex) { throw 'Another workspace install or rollback is running.' }
 $manifestPath = Join-Path $InstallRoot 'installation.json'
 if (!(Test-Path -LiteralPath $manifestPath)) { throw "No installation manifest: $manifestPath" }
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+$settingsHelper = Join-Path $InstallRoot 'TerminalSettings.ps1'
+if (Test-Path -LiteralPath $settingsHelper) { . $settingsHelper }
 
 function ConvertTo-CanonicalValue($Value) {
     if ($Value -is [Collections.IDictionary]) {
@@ -30,6 +32,9 @@ function ConvertTo-CanonicalValue($Value) {
 function Test-TerminalGeneratedSettings($Entry) {
     # Terminal persists these fragment registrations itself on first launch.
     # Accept that known transformation, but still refuse unrelated user edits.
+    if ($Entry.PSObject.Properties['installedContent'] -and $Entry.installedContent -and (Test-Path -LiteralPath $settingsHelper)) {
+        return Test-TerminalSettingsEquivalent $Entry.installedContent ([IO.File]::ReadAllText($Entry.path))
+    }
     if (!$Entry.existed -or $Entry.path -notmatch '[/\\]settings\.json$' -or !(Test-Path -LiteralPath $Entry.backup)) { return $false }
     try {
         $before = Get-Content -LiteralPath $Entry.backup -Raw | ConvertFrom-Json -AsHashtable
