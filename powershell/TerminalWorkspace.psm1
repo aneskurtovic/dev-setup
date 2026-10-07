@@ -231,11 +231,52 @@ function Test-AiWorkspace {
     [pscustomobject]@{ Check = 'Terminal profiles'; OK = Test-Path -LiteralPath $fragment; Detail = $fragment }
 }
 
+function Get-WorkspaceCommandConflicts([string[]] $Names) {
+    # A missing-name Get-Command lookup is expensive on Windows. Snapshot loaded
+    # shell commands once, then inspect each PATH directory once for executable conflicts.
+    $wanted = @{}
+    foreach ($name in $Names) { $wanted[$name] = $true }
+    $conflicts = @{}
+    foreach ($command in Get-Command -ListImported -All -CommandType Alias,Function,Cmdlet) {
+        if ($wanted.ContainsKey($command.Name) -and !$conflicts.ContainsKey($command.Name)) {
+            $conflicts[$command.Name] = $command
+        }
+    }
+    $files = @{}
+    $extensions = @('', '.ps1') + @($env:PATHEXT -split ';' | Where-Object { $_ })
+    foreach ($name in $Names) {
+        if ($conflicts.ContainsKey($name)) { continue }
+        foreach ($extension in $extensions) { $files[$name + $extension] = $name }
+    }
+    if ($files.Count) {
+        foreach ($directory in @($env:PATH -split ';' | Where-Object { $_ } | Select-Object -Unique)) {
+            try {
+                $directory = [Environment]::ExpandEnvironmentVariables($directory.Trim('"'))
+                foreach ($path in [IO.Directory]::EnumerateFiles($directory)) {
+                    $fileName = [IO.Path]::GetFileName($path)
+                    if (!$files.ContainsKey($fileName)) { continue }
+                    $name = $files[$fileName]
+                    if (!$conflicts.ContainsKey($name)) {
+                        $conflicts[$name] = [pscustomobject]@{ModuleName='';CommandType=if ([IO.Path]::GetExtension($path) -ieq '.ps1') {'ExternalScript'} else {'Application'};Source=$path}
+                    }
+                }
+            } catch [IO.IOException] {} catch [UnauthorizedAccessException] {} catch [ArgumentException] {}
+        }
+    }
+    return $conflicts
+}
+
+$registeredProjects = @(Read-WorkspaceRegistry)
+$registrationNames = @(foreach ($project in $registeredProjects) {
+    if (!$project.enabled) { continue }
+    foreach ($name in @($project.command) + @($project.aliases)) { $name; $name + 'cc'; $name + 'cx' }
+})
+$commandConflicts = Get-WorkspaceCommandConflicts $registrationNames
 $exported = @('ai-workspace','ai-workspace-resume','ai-workspace-agents','Get-AiProject','Invoke-AiProject','Resolve-AiProjectRoot','Test-AiWorkspace')
-foreach ($project in Read-WorkspaceRegistry) {
+foreach ($project in $registeredProjects) {
     if (!$project.enabled) { continue }
     foreach ($name in @($project.command) + @($project.aliases)) {
-        $existing = Get-Command $name -ErrorAction SilentlyContinue
+        $existing = $commandConflicts[$name]
         if ($existing -and $existing.ModuleName -ne 'TerminalWorkspace') {
             if (!$project.replaceNavigation -or $existing.CommandType -ne 'Function') {
                 Write-Warning "Skipping conflicting command '$name'. Use Invoke-AiProject -Name '$($project.command)'."
@@ -248,7 +289,7 @@ foreach ($project in Read-WorkspaceRegistry) {
     }
     foreach ($shortcut in @(foreach ($entry in @($project.command) + @($project.aliases)) { @{Name=$entry + 'cc';Action='claude'}, @{Name=$entry + 'cx';Action='codex'} })) {
         $name = $shortcut.Name
-        $existing = Get-Command $name -ErrorAction SilentlyContinue
+        $existing = $commandConflicts[$name]
         if ($existing -and $existing.ModuleName -ne 'TerminalWorkspace') {
             if (!$project.replaceNavigation -or $existing.CommandType -ne 'Function') {
                 Write-Warning "Skipping conflicting command '$name'. Use Invoke-AiProject -Name '$($project.command)' -Action '$($shortcut.Action)'."

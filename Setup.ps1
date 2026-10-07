@@ -12,7 +12,7 @@ param(
     [switch] $Json
 )
 $ErrorActionPreference = 'Stop'
-$report = [ordered]@{ schemaVersion=1; mode=$Mode; preset=$Preset; ready=$false; packages=@(); repositories=$null; workspace=$null; manualSteps=@(); error=$null; reportPath=$null }
+$report = [ordered]@{ schemaVersion=1; mode=$Mode; preset=$Preset; ready=$false; packages=@(); prerequisites=@(); repositories=$null; workspace=$null; display=$null; manualSteps=@(); error=$null; reportPath=$null }
 $lock = $null
 $journalPath = $null
 try {
@@ -21,6 +21,7 @@ Import-Module (Join-Path $PSScriptRoot 'powershell/DevSetup.psm1') -Force
 Update-ProcessPath
 if ($Preset -eq 'developer') { Import-Module (Join-Path $PSScriptRoot 'powershell/RepositorySetup.psm1') -Force }
 . (Join-Path $PSScriptRoot 'powershell/ConfigEditing.ps1')
+. (Join-Path $PSScriptRoot 'powershell/ProjectCommands.ps1')
 $packages = @(Read-CoreManifest (Join-Path $PSScriptRoot "manifests/$Preset.json"))
 if ($Mode -eq 'Update' -and !$Component) { throw 'Update requires -Component with explicit package names.' }
 if ($ChooseRepositories -and $Mode -ne 'Apply') { throw '-ChooseRepositories requires Apply.' }
@@ -30,11 +31,20 @@ if ($Preset -eq 'developer' -and ![IO.Path]::IsPathFullyQualified($ProjectRoot))
 if ($Component) {
     if ($Mode -ne 'Update') { throw '-Component is supported only with Update; Apply always verifies all dependencies.' }
     foreach ($name in $Component) { if ($name -notin $packages.name) { throw "Unknown component: $name" } }
-    $packages = @($packages | Where-Object name -In $Component)
+    # Check transitive prerequisites without updating unselected packages.
+    $needed = @($Component)
+    do {
+        $previousCount = $needed.Count
+        foreach ($p in @($packages | Where-Object name -In $needed)) {
+            if ($p.PSObject.Properties['requires']) { $needed += @($p.requires) }
+        }
+        $needed = @($needed | Select-Object -Unique)
+    } while ($needed.Count -gt $previousCount)
+    $packages = @($packages | Where-Object name -In $needed)
 }
 $installArgs = @{}
 if ($ProjectsFile) { $installArgs.ProjectsFile = $ProjectsFile }
-if ($Preset -eq 'developer') { $installArgs.ConfigureDisplay = $true }
+$packageStates = @{}
     if ($Mode -in @('Apply','Update')) {
         $null = New-Item -ItemType Directory -Path $StateRoot -Force
         try { $lock = [IO.File]::Open((Join-Path $StateRoot 'setup.lock'), 'OpenOrCreate', 'ReadWrite', 'None') }
@@ -44,15 +54,15 @@ if ($Preset -eq 'developer') { $installArgs.ConfigureDisplay = $true }
     }
     foreach ($package in $packages) {
         try {
-        $state = Get-CorePackageState $package
+        $state = Get-CorePackageState $package -RuntimeHealth:($Mode -eq 'Doctor')
         $dependencies = if ($package.PSObject.Properties['requires']) { @($package.requires) } else { @() }
-        $unready = @($dependencies | Where-Object { $_ -notin @($report.packages | Where-Object Status -EQ 'Ready' | ForEach-Object Name) })
+        $unready = @($dependencies | Where-Object { !$packageStates.ContainsKey($_) -or $packageStates[$_].Status -ne 'Ready' })
         if ($unready.Count) { $state = [pscustomobject]@{Name=$package.name;Status='Blocked';Version=$null;Detail=('Requires ' + ($unready -join ', '))} }
         elseif ($Mode -eq 'Apply' -and $state.Status -eq 'Missing') {
             if (!$Json) { Write-Host "Installing $($package.name)..." }
             $state = Install-CorePackage $package
         }
-        elseif ($Mode -eq 'Update') {
+        elseif ($Mode -eq 'Update' -and $package.name -in $Component) {
             if (!$Json) { Write-Host "Updating $($package.name)..." }
             if ($state.Status -eq 'Missing') { $state = Install-CorePackage $package }
             else { $state = Install-CorePackage $package -Update }
@@ -60,24 +70,30 @@ if ($Preset -eq 'developer') { $installArgs.ConfigureDisplay = $true }
         } catch {
             $state = [pscustomobject]@{Name=$package.name;Status='Failed';Version=$null;Detail=$_.Exception.Message}
         }
-        $report.packages += $state
+        $packageStates[$package.name] = $state
+        if ($Mode -eq 'Update' -and $package.name -notin $Component) { $report.prerequisites += $state }
+        else { $report.packages += $state }
         if ($state.Status -eq 'Incompatible') {
             $updateCommand = if ($package.source -eq 'winget') { "winget upgrade --id $($package.id) --exact --source winget" }
                 elseif ($package.source -eq 'npm') { "npm install --global $($package.id)@latest" }
-                else { 'wsl --update' }
+                else { 'wsl --set-version Ubuntu 2' }
             $report.manualSteps += "Update $($package.name) explicitly: $updateCommand, then rerun Apply."
-        } elseif ($state.Status -in @('Failed','Conflict','NeedsAttention','NeedsRestart')) {
+        } elseif ($state.Status -in @('Failed','Conflict','NeedsAttention','NeedsRestart','Blocked')) {
             $report.manualSteps += "$($package.name): $($state.Detail)"
         }
         if ($journalPath) { Write-AtomicBytes $journalPath ([Text.Encoding]::UTF8.GetBytes(($report | ConvertTo-Json -Depth 10))) }
         if ($state.Status -eq 'NeedsRestart') { break }
     }
     if ($Mode -ne 'Update') {
-        if (@($report.packages | Where-Object Status -NE 'Ready').Count) {
-            $report.workspace = @{ Status='Blocked'; Detail='Resolve missing/incompatible packages, then rerun.' }
-            if ($Preset -eq 'developer') { $report.repositories = @{ Status='Blocked'; Detail='Finish package setup first.' } }
-        } else {
-            if ($Preset -eq 'developer') {
+        $readyNames = @($report.packages | Where-Object Status -EQ 'Ready' | ForEach-Object Name)
+        $workspaceBlockers = @('powershell','terminal','git' | Where-Object { $_ -notin $readyNames })
+        $repositoryBlockers = @('git','github' | Where-Object { $_ -notin $readyNames })
+        $displayBlockers = @('powershell','terminal','git','node' | Where-Object { $_ -notin $readyNames })
+        if ($Preset -eq 'developer') {
+            if ($repositoryBlockers.Count) {
+                $report.repositories = @{Status='Blocked';Detail=('Requires ' + ($repositoryBlockers -join ', '))}
+            } else {
+              try {
                 $selectionPath = Join-Path $StateRoot 'repositories.json'
                 if ($Mode -eq 'Apply') {
                     if ($RepositoriesFile -or $ChooseRepositories -or !(Test-Path -LiteralPath $selectionPath)) {
@@ -108,39 +124,76 @@ if ($Preset -eq 'developer') { $installArgs.ConfigureDisplay = $true }
                 }
                 if (!$ProjectsFile -and $report.repositories.Status -eq 'Ready') {
                     $registryPath = Join-Path $StateRoot 'projects.json'
+                    # Keep established commands and aliases when refreshing verified clone paths.
+                    $existingProjects = @()
+                    foreach ($source in @((Join-Path $env:LOCALAPPDATA 'TerminalDevSetup/projects.json'), $registryPath)) {
+                        if (Test-Path -LiteralPath $source) {
+                            $saved = Get-Content -LiteralPath $source -Raw | ConvertFrom-Json
+                            if ($saved.schemaVersion -ne 1 -or !$saved.PSObject.Properties['projects']) { throw "Invalid project registry: $source" }
+                            $existingProjects += @($saved.projects)
+                        }
+                    }
                     $usedCommands = @{}
                     $registry = @{schemaVersion=1;projects=@($selected | ForEach-Object {
                         $repositoryName = $_
                         $repoPath = [IO.Path]::GetFullPath(($repoStates | Where-Object Repository -EQ $repositoryName | Select-Object -First 1).Path)
+                        $previous = $existingProjects | Where-Object { $_.displayName -ieq $repositoryName -or $_.path -ieq $repoPath } | Select-Object -First 1
                         $command = ($_.ToLowerInvariant() -replace '[^a-z0-9-]','-').Trim('-')
                         if ($command -notmatch '^[a-z]') { $command = 'repo-' + $command }
                         if ($command -in @('ai-workspace','ai-workspace-resume','ai-workspace-agents','ai-projects','ai-doctor')) { $command = 'repo-' + $command }
+                        if ($previous) { $command = $previous.command }
                         if ($usedCommands.ContainsKey($command) -or $usedCommands.ContainsKey($command + 'cc') -or $usedCommands.ContainsKey($command + 'cx')) {
                             $hash = [Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($_))
                             $command += '-' + [Convert]::ToHexString($hash).Substring(0,8).ToLowerInvariant()
                         }
-                        foreach ($name in @($command, ($command + 'cc'), ($command + 'cx'))) { $usedCommands[$name] = $true }
-                        @{command=$command;displayName=$_;path=$repoPath;enabled=$true;replaceNavigation=$false;aliases=@()}
-                    })} | ConvertTo-Json -Depth 6
+                        $aliases = @(if ($previous) { $previous.aliases })
+                        foreach ($entryName in @($command) + $aliases) {
+                            foreach ($name in @($entryName, ($entryName + 'cc'), ($entryName + 'cx'))) { $usedCommands[$name] = $true }
+                        }
+                        @{command=$command;displayName=$_;path=$repoPath;enabled=if ($previous) {$previous.enabled} else {$true};replaceNavigation=if ($previous) {$previous.replaceNavigation} else {$false};aliases=@($aliases)}
+                    })}
+                    Add-RepositoryNameAliases $registry.projects
+                    $registry = $registry | ConvertTo-Json -Depth 6
                     if ($Mode -eq 'Apply') { Write-AtomicBytes $registryPath ([Text.Encoding]::UTF8.GetBytes($registry)) }
                     if (Test-Path -LiteralPath $registryPath) { $installArgs.ProjectsFile = $registryPath }
                 }
+              } catch {
+                $report.repositories = @{Status='Conflict';Detail=$_.Exception.Message}
+                $report.manualSteps += "Repositories: $($_.Exception.Message)"
+              }
             }
-            try {
-                $changes = @(& (Join-Path $PSScriptRoot 'Install.ps1') @installArgs -Preview)
-                if ($Mode -eq 'Apply') {
-                    & (Join-Path $PSScriptRoot 'Install.ps1') @installArgs 6>$null
-                    $changes = @(& (Join-Path $PSScriptRoot 'Install.ps1') @installArgs -Preview)
+            if ($displayBlockers.Count) {
+                $report.display = @{Status='Blocked';Detail=('Requires ' + ($displayBlockers -join ', '))}
+            }
+        }
+        if ($workspaceBlockers.Count) {
+            $report.workspace = @{Status='Blocked';Detail=('Requires ' + ($workspaceBlockers -join ', '))}
+        } else {
+            $features = @('workspace')
+            if ($Preset -eq 'developer' -and !$displayBlockers.Count) { $features += 'display' }
+            foreach ($feature in $features) {
+                if ($feature -eq 'display' -and $report.workspace.Status -eq 'Conflict') {
+                    $report.display = @{Status='Blocked';Detail='Resolve the workspace configuration conflict first'}
+                    continue
                 }
-                $pending = @($changes | Where-Object Action -NE 'Unchanged')
-                $report.workspace = @{ Status=if ($pending.Count) {'ChangesNeeded'} else {'Ready'}; Changes=$pending }
-            } catch {
-                $report.workspace = @{ Status='Conflict'; Detail=$_.Exception.Message }
-                $report.manualSteps += "Workspace: $($_.Exception.Message)"
+                $featureArgs = $installArgs.Clone()
+                if ($feature -eq 'display') { $featureArgs.ConfigureDisplay = $true }
+                try {
+                    $changes = @(& (Join-Path $PSScriptRoot 'Install.ps1') @featureArgs -Preview)
+                    if ($Mode -eq 'Apply') {
+                        & (Join-Path $PSScriptRoot 'Install.ps1') @featureArgs 6>$null
+                        $changes = @(& (Join-Path $PSScriptRoot 'Install.ps1') @featureArgs -Preview)
+                    }
+                    $pending = @($changes | Where-Object Action -NE 'Unchanged')
+                    $report[$feature] = @{Status=if ($pending.Count) {'ChangesNeeded'} else {'Ready'};Changes=$pending}
+                } catch {
+                    $report[$feature] = @{Status='Conflict';Detail=$_.Exception.Message}
+                    $report.manualSteps += "$feature`: $($_.Exception.Message)"
+                }
             }
         }
     }
-    $report.ready = @($report.packages | Where-Object Status -NE 'Ready').Count -eq 0 -and ($Mode -eq 'Update' -or ($report.workspace.Status -eq 'Ready' -and ($Preset -eq 'core' -or $report.repositories.Status -eq 'Ready')))
+    $report.ready = @($report.packages | Where-Object Status -NE 'Ready').Count -eq 0 -and ($Mode -eq 'Update' -or ($report.workspace.Status -eq 'Ready' -and ($Preset -eq 'core' -or ($report.repositories.Status -eq 'Ready' -and $report.display.Status -eq 'Ready'))))
 } catch {
     $report.error = $_.Exception.Message
     $report.manualSteps += "Resolve this error, then rerun $Mode`: $($report.error)"
@@ -157,8 +210,10 @@ finally {
 if ($Json) { $report | ConvertTo-Json -Depth 10 }
 else {
     $report.packages | Format-Table Name,Status,Version,Detail -AutoSize
+    if ($report.prerequisites.Count) { Write-Host 'Checked prerequisites (not updated):'; $report.prerequisites | Format-Table Name,Status,Version,Detail -AutoSize }
     if ($report.workspace) { Write-Host ('Workspace: ' + $report.workspace.Status); $report.workspace | ConvertTo-Json -Depth 6 | Write-Host }
     if ($report.repositories) { Write-Host ('Repositories: ' + $report.repositories.Status); $report.repositories | ConvertTo-Json -Depth 6 | Write-Host }
+    if ($report.display) { Write-Host ('Display: ' + $report.display.Status); $report.display | ConvertTo-Json -Depth 6 | Write-Host }
     if ($report.error) { Write-Host $report.error -ForegroundColor Red }
     $report.manualSteps | ForEach-Object { Write-Host $_ }
     if ($journalPath) { Write-Host "Run report: $journalPath" }

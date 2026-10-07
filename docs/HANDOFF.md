@@ -20,7 +20,15 @@ See [LAPTOP-VERIFICATION.md](LAPTOP-VERIFICATION.md) for evidence and its limits
 - Keep inline quickstart failures concise without closing the user's shell. Report restart requirements only when an installer returns one.
 - Accept known Terminal serialization and generated registrations while protecting unrelated edits and retaining original backups.
 
-Project command names are generated as `owner-repo`, with `cc`/`cx` suffixes. Shorter aliases require a custom project registry; automatic selection leaves aliases empty. Runtime files and original backups remain under `%LOCALAPPDATA%\TerminalDevSetup`.
+Project command names are generated as `owner-repo`, with `cc`/`cx` suffixes. The published preview leaves aliases empty; current checkout setup adds collision-checked repository-name aliases and preserves established custom names. Runtime files and original backups remain under `%LOCALAPPDATA%\TerminalDevSetup`.
+
+## Changes after v0.3.2-preview
+
+The working checkout fixes targeted Update dependency checks, adds bounded WSL/Linux-user and Docker-engine probes to developer Doctor, and separates repository/workspace/display prerequisite gates. It also generates repository-name aliases. These changes are not included in the published preview command until a new implementation release is published. See [ADVANCED.md](ADVANCED.md) for the checkout behavior.
+
+Local validation passed the existing 60 workspace and 38 provider/setup checks, 31 final orchestration checks, 17 runtime health checks, 8 alias checks, and repository/quickstart regressions. Local developer Apply and Doctor both returned ready with all 19 packages and all three feature gates ready. Doctor verified Ubuntu under WSL 2 with UID 1000 and Docker engine 29.8.2 connectivity. All eight installed repository-name aliases passed navigation and both agent launch previews in fresh PowerShell 7 and Windows PowerShell 5.1 sessions. These are existing-machine results; fresh-machine/reboot acceptance remains open.
+
+Workspace startup was subsequently optimized and installed locally. Registration now snapshots imported shell commands once and scans each PATH directory once for executable/script conflicts, instead of looking up each generated name separately. With eight projects and their aliases, measured module import fell from 3929 ms to 648 ms; a fresh PowerShell process explicitly loading the user profile fell from 5292 ms to 1898 ms. These single-run timings exclude Terminal rendering and interactive PSReadLine startup; the no-profile process baseline measured 1094 ms. All 60 existing workspace checks and 8 new startup conflict/discovery checks passed, and the installed aliases were reverified in both PowerShell versions.
 
 ## Remaining acceptance work
 

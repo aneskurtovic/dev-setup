@@ -56,7 +56,7 @@ ai-workspace              # Open Codex, Claude, and a shell for this folder
 | `<project>cc` / `<project>cx` | Full-window Claude / Codex for that project |
 | `<project> ai-workspace` | Three-pane workspace for that project |
 
-`ai-projects` shows the actual `<project>` command names. For a selected repository named `owner/repo`, the generated command is normally `owner-repo`. Project window titles start with the project name.
+`ai-projects` shows the actual `<project>` command names and aliases. For a selected repository named `owner/repo`, the generated command is normally `owner-repo`. Setup from the current checkout also adds a lowercase repository-name alias, converting punctuation to hyphens: `ContextTrace` becomes `contexttrace`, and `Ludo.Nexus` becomes `ludo-nexus`. Aliases get the same `cc`/`cx` shortcuts. Conflicting automatic aliases are omitted; established custom commands and aliases are preserved. These alias changes are not yet in the published preview. Project window titles start with the project name.
 
 Both PowerShell 7 and Windows PowerShell 5.1 user profiles load the workspace commands and Git-aware prompt. Existing terminal sessions need a new window or a [profile reload](docs/ADVANCED.md#powershell-profiles-and-shortcuts).
 
@@ -67,6 +67,6 @@ Both PowerShell 7 and Windows PowerShell 5.1 user profiles load the workspace co
 - **Older incompatible app or configuration conflict:** Follow the recovery command shown in the terminal and review the report under `%LOCALAPPDATA%\DevSetup\runs`. Setup preserves existing installations and edited configuration.
 - **Command not found after installation:** Open a new PowerShell window to load the installed profile and commands. Setup refreshes its own PATH before checking packages, so rerunning setup from an older shell also sees newly installed tools.
 
-Failures retain completed changes and produce a nonzero exit status. Independent package checks continue; dependencies and workspace configuration are blocked until their prerequisites pass. Quickstart prints concise recovery guidance and leaves your interactive shell open. Restart instructions appear only when an installer reports a restart requirement.
+Failures retain completed changes and produce a nonzero exit status. Independent package checks continue. Repository setup, the base workspace, and display integration each proceed when their own prerequisites pass. Quickstart prints concise recovery guidance and leaves your interactive shell open. Restart instructions appear only when an installer reports a restart requirement.
 
 The [quickstart script](quickstart.ps1) is short and available to review before running the command. For planning without making changes, package updates, project customization, rollback, and tests, see [Advanced setup](docs/ADVANCED.md). Setup currently has [fresh-machine testing limits](docs/CLEAN-MACHINE-TEST.md).

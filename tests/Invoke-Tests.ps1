@@ -12,10 +12,16 @@ try {
     }
     & pwsh -NoProfile -File "$PSScriptRoot/Test-Workspace.ps1"
     if ($LASTEXITCODE) { throw 'Workspace tests failed.' }
+    & pwsh -NoProfile -File "$PSScriptRoot/Test-WorkspaceStartup.ps1"
+    if ($LASTEXITCODE) { throw 'Workspace startup tests failed.' }
     & pwsh -NoProfile -File "$PSScriptRoot/Test-Setup.ps1"
     if ($LASTEXITCODE) { throw 'Setup tests failed.' }
     & pwsh -NoProfile -File "$PSScriptRoot/Test-Orchestration.ps1"
     if ($LASTEXITCODE) { throw 'Orchestration tests failed.' }
+    & pwsh -NoProfile -File "$PSScriptRoot/Test-RuntimeHealth.ps1"
+    if ($LASTEXITCODE) { throw 'Runtime health tests failed.' }
+    & pwsh -NoProfile -File "$PSScriptRoot/Test-ProjectCommands.ps1"
+    if ($LASTEXITCODE) { throw 'Project command tests failed.' }
     & pwsh -NoProfile -File "$PSScriptRoot/Test-Repositories.ps1"
     if ($LASTEXITCODE) { throw 'Repository tests failed.' }
     & pwsh -NoProfile -File "$PSScriptRoot/Test-Quickstart.ps1"

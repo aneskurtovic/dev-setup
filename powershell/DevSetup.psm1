@@ -42,11 +42,18 @@ function Invoke-SetupProcess([string] $File, [string[]] $Arguments, [int] $Timeo
         $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
         foreach ($arg in @('-NoProfile','-EncodedCommand',$encoded)) { $info.ArgumentList.Add($arg) }
     } else { foreach ($arg in $Arguments) { $info.ArgumentList.Add($arg) } }
-    if ([IO.Path]::GetFileName($File) -ieq 'wsl.exe') { $info.StandardOutputEncoding = [Text.Encoding]::Unicode; $info.StandardErrorEncoding = [Text.Encoding]::Unicode }
+    # WSL management output is UTF-16; commands executed inside Linux emit UTF-8.
+    if ([IO.Path]::GetFileName($File) -ieq 'wsl.exe') {
+        $encoding = if ('--exec' -in $Arguments) { [Text.Encoding]::UTF8 } else { [Text.Encoding]::Unicode }
+        $info.StandardOutputEncoding = $encoding
+        $info.StandardErrorEncoding = $encoding
+        if ('--exec' -in $Arguments) { $info.RedirectStandardInput = $true }
+    }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $info
     try {
         $null = $process.Start()
+        if ($info.RedirectStandardInput) { $process.StandardInput.Close() }
         $stdout = $process.StandardOutput.ReadToEndAsync()
         $stderr = $process.StandardError.ReadToEndAsync()
         if (!$process.WaitForExit($TimeoutSeconds * 1000)) {
@@ -64,7 +71,7 @@ function Get-SetupProcessDetail($Result) {
     return $detail
 }
 
-function Get-CorePackageState($Package) {
+function Get-CorePackageState($Package, [switch] $RuntimeHealth) {
     if ($Package.PSObject.Properties['check'] -and $Package.check -eq 'registry') {
         $uninstallPaths = @('HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*')
         $installed = @(Get-ItemProperty $uninstallPaths -ErrorAction SilentlyContinue | Where-Object { $_.PSObject.Properties['DisplayName'] -and $_.DisplayName -match $Package.displayNamePattern })
@@ -80,7 +87,27 @@ function Get-CorePackageState($Package) {
         try {
             $listed = Invoke-SetupProcess $wsl.Source @('--list','--quiet') 15
             $names = @($listed.Output -split '\r?\n' | ForEach-Object { $_.Trim([char]0,[char]0xfeff,' ') } | Where-Object { $_ })
-            if ($listed.ExitCode -eq 0 -and 'Ubuntu' -in $names) { return [pscustomobject]@{Name=$Package.name;Status='Ready';Version='2';Detail='Ubuntu WSL distribution registered'} }
+            if ($listed.ExitCode -eq 0 -and 'Ubuntu' -in $names) {
+                $verbose = Invoke-SetupProcess $wsl.Source @('--list','--verbose') 15
+                $row = [regex]::Match(($verbose.Output -replace '\x00|\uFEFF',''), '(?m)^\s*\*?\s*Ubuntu\s+.+?\s+(\d+)\s*$')
+                if ($verbose.ExitCode -ne 0 -or !$row.Success) { throw "Could not determine Ubuntu's WSL version. $(Get-SetupProcessDetail $verbose)" }
+                $version = $row.Groups[1].Value
+                if ([version]($version + '.0.0') -lt [version]$Package.minimumVersion) {
+                    return [pscustomobject]@{Name=$Package.name;Status='Incompatible';Version=$version;Detail='Ubuntu requires WSL 2. Run wsl --set-version Ubuntu 2, then rerun Doctor.'}
+                }
+                if ($RuntimeHealth) {
+                    try {
+                        $linux = Invoke-SetupProcess $wsl.Source @('--distribution','Ubuntu','--exec','id','-u') 30
+                        $uid = ($linux.Output -replace '\x00|\uFEFF','').Trim()
+                        if ($linux.ExitCode -ne 0 -or $uid -notmatch '^\d+$') { throw "Linux command did not succeed. $(Get-SetupProcessDetail $linux)" }
+                        if ([long]$uid -eq 0) { throw 'The default Linux account is root; a personal default user has not been verified.' }
+                    } catch {
+                        return [pscustomobject]@{Name=$Package.name;Status='NeedsAttention';Version=$version;Detail="Launch Ubuntu and finish creating/selecting your personal default Linux user, then rerun Doctor. $($_.Exception.Message)"}
+                    }
+                    return [pscustomobject]@{Name=$Package.name;Status='Ready';Version=$version;Detail="Ubuntu runs under WSL $version; Linux command succeeded as UID $uid"}
+                }
+                return [pscustomobject]@{Name=$Package.name;Status='Ready';Version=$version;Detail="Ubuntu registered under WSL $version; run Doctor to verify Linux user and runtime health"}
+            }
             if ($listed.ExitCode -ne 0 -and $listed.Output -notmatch 'has no installed distributions') {
                 return [pscustomobject]@{Name=$Package.name;Status='Conflict';Version=$null;Detail="WSL inspection exited $($listed.ExitCode). $(Get-SetupProcessDetail $listed)"}
             }
@@ -106,6 +133,16 @@ function Get-CorePackageState($Package) {
         if (!$match -or !$match.Success) { throw 'Could not determine version; verify the existing installation.' }
         $version = [version]$match.Value
         $status = if ($version -ge [version]$Package.minimumVersion) { 'Ready' } else { 'Incompatible' }
+        if ($Package.name -eq 'docker' -and $status -eq 'Ready' -and $RuntimeHealth) {
+            try {
+                $engine = Invoke-SetupProcess $command.Source @('version','--format','{{.Server.Version}}') 15
+                $serverVersion = $engine.Output.Trim()
+                if ($engine.ExitCode -ne 0 -or $serverVersion -notmatch '^\d+\.\d+\.\d+\S*$') { throw "Engine query did not succeed. $(Get-SetupProcessDetail $engine)" }
+                return [pscustomobject]@{Name=$Package.name;Status='Ready';Version=$version.ToString();Detail="Docker engine $serverVersion reachable using the current Docker context"}
+            } catch {
+                return [pscustomobject]@{Name=$Package.name;Status='NeedsAttention';Version=$version.ToString();Detail="Docker CLI is installed but the engine is unreachable. Start Docker Desktop and check docker context show, then rerun Doctor. $($_.Exception.Message)"}
+            }
+        }
         [pscustomobject]@{ Name=$Package.name; Status=$status; Version=$version.ToString(); Detail=$command.Source }
     } catch {
         if ($Package.name -eq 'python' -and $command.Source -match '[/\\]WindowsApps[/\\]') {

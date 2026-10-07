@@ -6,12 +6,14 @@ $scratch = Join-Path ([IO.Path]::GetTempPath()) ('dev-setup-runner-' + [guid]::N
 $null = New-Item -ItemType Directory -Path "$scratch/powershell","$scratch/manifests"
 Copy-Item "$repo/Setup.ps1" $scratch
 Copy-Item "$repo/powershell/ConfigEditing.ps1" "$scratch/powershell"
+Copy-Item "$repo/powershell/ProjectCommands.ps1" "$scratch/powershell"
 Copy-Item "$repo/manifests/core.json" "$scratch/manifests"
 Copy-Item "$repo/manifests/developer.json" "$scratch/manifests"
 @'
 function Read-CoreManifest($Path) { (Get-Content $Path -Raw | ConvertFrom-Json).packages }
 function Update-ProcessPath {}
-function Get-CorePackageState($Package) {
+function Get-CorePackageState($Package, [switch]$RuntimeHealth) {
+    if ($RuntimeHealth) { Add-Content "$PSScriptRoot/runtime-checks.txt" $Package.name }
     $status = if (Test-Path "$PSScriptRoot/$($Package.name).incompatible") {'Incompatible'} elseif (Test-Path "$PSScriptRoot/$($Package.name).installed") {'Ready'} else {'Missing'}
     [pscustomobject]@{Name=$Package.name;Status=$status;Version='1.0';Detail='fixture'}
 }
@@ -25,7 +27,10 @@ function Install-CorePackage($Package,[switch]$Update) {
 Export-ModuleMember -Function Read-CoreManifest,Update-ProcessPath,Get-CorePackageState,Install-CorePackage
 '@ | Set-Content "$scratch/powershell/DevSetup.psm1"
 @'
-function Get-RepositoryInventory { @([pscustomobject]@{NameWithOwner='alice/alpha';Owner='alice';Name='alpha'}) }
+function Get-RepositoryInventory {
+    if (Test-Path "$PSScriptRoot/inventory.fail") { throw 'fixture GitHub authentication failed' }
+    @([pscustomobject]@{NameWithOwner='alice/alpha';Owner='alice';Name='alpha'})
+}
 function Read-RepositorySelection($Path,$Inventory) { @((Get-Content $Path -Raw | ConvertFrom-Json).repositories) }
 function Get-RepositoryState($NameWithOwner,$Root) {
     $path = if (Test-Path "$PSScriptRoot/repo-path.txt") { (Get-Content "$PSScriptRoot/repo-path.txt" -Raw).Trim() } else { Join-Path $Root 'alice/alpha' }
@@ -40,13 +45,22 @@ Export-ModuleMember -Function Get-RepositoryInventory,Read-RepositorySelection,G
 '@ | Set-Content "$scratch/powershell/RepositorySetup.psm1"
 @'
 param([switch]$Preview,[string]$ProjectsFile,[switch]$ConfigureDisplay)
-if ($Preview) { [pscustomobject]@{Target='fixture';Action=if (Test-Path "$PSScriptRoot/configured") {'Unchanged'} else {'Write'} } }
-else { Set-Content "$PSScriptRoot/configured" 'fixture' }
+if ($ConfigureDisplay -and (Test-Path "$PSScriptRoot/display.fail")) { throw 'fixture display configuration conflict' }
+$target = if ($ConfigureDisplay) { 'display-configured' } else { 'configured' }
+if ($Preview) { [pscustomobject]@{Target=$target;Action=if (Test-Path "$PSScriptRoot/$target") {'Unchanged'} else {'Write'} } }
+else { Set-Content "$PSScriptRoot/$target" 'fixture' }
 '@ | Set-Content "$scratch/Install.ps1"
 $script:passed=0
 function Assert($Condition,$Message) { if (!$Condition) { throw "FAIL: $Message" }; $script:passed++; Write-Host "PASS: $Message" }
 function Invoke-Fixture($Mode) {
     $out = & pwsh -NoProfile -File "$scratch/Setup.ps1" -Mode $Mode -StateRoot "$scratch/state" -Json
+    [pscustomobject]@{Code=$LASTEXITCODE;Report=($out | ConvertFrom-Json)}
+}
+function Invoke-DeveloperFixture($Mode = 'Apply', [string[]]$Components) {
+    $arguments = @('-NoProfile','-File',"$scratch/Setup.ps1",'-Mode',$Mode,'-Preset','developer','-ProjectRoot',$cloneRoot,'-StateRoot',$developerState,'-Json')
+    # A single component is sufficient for these explicit-update regression cases.
+    if ($Components) { $arguments += @('-Component', $Components[0]) }
+    $out = & pwsh @arguments
     [pscustomobject]@{Code=$LASTEXITCODE;Report=($out | ConvertFrom-Json)}
 }
 $plan=Invoke-Fixture Plan
@@ -61,6 +75,7 @@ $second=Invoke-Fixture Apply
 Assert ($second.Code -eq 0 -and $second.Report.ready -and @(Get-Content "$scratch/powershell/install-calls.txt").Count -eq 4) 'Second Apply skips every already-ready package'
 $doctor=Invoke-Fixture Doctor
 Assert ($doctor.Code -eq 0 -and $doctor.Report.ready) 'Doctor exits zero after successful setup'
+Assert (@(Get-Content "$scratch/powershell/runtime-checks.txt").Count -eq 8) 'Only Doctor requests runtime health checks; Plan and Apply remain passive'
 Assert (@(Get-ChildItem "$scratch/state/runs" -Filter *.json).Count -eq 2) 'Only Apply operations create run reports'
 $developerState = Join-Path $scratch 'developer-state'
 $null=New-Item -ItemType Directory -Path $developerState
@@ -74,11 +89,57 @@ $developerApply = $out | ConvertFrom-Json
 Assert ($LASTEXITCODE -eq 0 -and $developerApply.ready -and $developerApply.repositories.Status -eq 'Ready') 'Developer Apply installs and clones selected repositories'
 $projectRegistry = Get-Content "$developerState/projects.json" -Raw | ConvertFrom-Json
 Assert ($projectRegistry.projects[0].command -eq 'alice-alpha' -and $projectRegistry.projects[0].path -eq (Join-Path $cloneRoot 'alice/alpha')) 'Selected clone creates a project command at its owner/repo path'
+Assert (($projectRegistry.projects[0].aliases -join ',') -eq 'alpha') 'Automatic project registration includes a repository-name alias'
 $flatClone = Join-Path $cloneRoot 'alpha'
 Set-Content "$scratch/powershell/repo-path.txt" $flatClone
 $out = & pwsh -NoProfile -File "$scratch/Setup.ps1" -Mode Apply -Preset developer -ProjectRoot $cloneRoot -StateRoot $developerState -Json
 $projectRegistry = Get-Content "$developerState/projects.json" -Raw | ConvertFrom-Json
 Assert ($LASTEXITCODE -eq 0 -and $projectRegistry.projects[0].path -eq $flatClone) 'Project commands use the verified existing clone path'
+$projectRegistry.projects[0].command = 'alpha'
+$projectRegistry.projects[0].aliases = @('a','work-alpha')
+$projectRegistry.projects[0].replaceNavigation = $true
+$projectRegistry | ConvertTo-Json -Depth 8 | Set-Content "$developerState/projects.json"
+$preserved = Invoke-DeveloperFixture
+$projectRegistry = Get-Content "$developerState/projects.json" -Raw | ConvertFrom-Json
+Assert ($preserved.Code -eq 0 -and $projectRegistry.projects[0].command -eq 'alpha' -and ($projectRegistry.projects[0].aliases -join ',') -eq 'a,work-alpha' -and $projectRegistry.projects[0].replaceNavigation -and $projectRegistry.projects[0].path -eq $flatClone) 'Regenerating project paths preserves established commands, aliases, and navigation preferences'
+# Updates inspect prerequisites but must never install or update them implicitly.
+foreach ($case in @(@{Name='docker';Dependency='wsl'},@{Name='codex';Dependency='node'},@{Name='claude';Dependency='git'})) {
+    $before = @(Get-Content "$scratch/powershell/install-calls.txt").Count
+    $update = Invoke-DeveloperFixture Update @($case.Name)
+    $newCalls = @(@(Get-Content "$scratch/powershell/install-calls.txt") | Select-Object -Skip $before)
+    Assert ($update.Code -eq 0 -and $update.Report.ready -and @($newCalls).Count -eq 1 -and $newCalls[0] -eq $case.Name -and $update.Report.prerequisites[0].Name -eq $case.Dependency) "Updating $($case.Name) checks its installed prerequisite and updates only the selected package"
+}
+Remove-Item "$scratch/powershell/node.installed"
+$before = @(Get-Content "$scratch/powershell/install-calls.txt").Count
+$blockedUpdate = Invoke-DeveloperFixture Update @('codex')
+Assert ($blockedUpdate.Code -eq 1 -and $blockedUpdate.Report.packages[0].Status -eq 'Blocked' -and $blockedUpdate.Report.prerequisites[0].Status -eq 'Missing' -and @(Get-Content "$scratch/powershell/install-calls.txt").Count -eq $before) 'A missing unselected prerequisite blocks Update without installing it'
+Set-Content "$scratch/powershell/node.installed" 'fixture'
+$manifest = Get-Content "$scratch/manifests/developer.json" -Raw | ConvertFrom-Json
+($manifest.packages | Where-Object name -EQ node) | Add-Member -NotePropertyName requires -NotePropertyValue @('github')
+$manifest | ConvertTo-Json -Depth 8 | Set-Content "$scratch/manifests/developer.json"
+$transitive = Invoke-DeveloperFixture Update @('codex')
+Assert ($transitive.Code -eq 0 -and @($transitive.Report.prerequisites).Count -eq 2 -and $transitive.Report.prerequisites[0].Name -eq 'github') 'Targeted updates check the transitive prerequisite closure in manifest order'
+Copy-Item "$repo/manifests/developer.json" "$scratch/manifests/developer.json" -Force
+Set-Content "$scratch/powershell/sevenzip.incompatible" 'fixture'
+$partial = Invoke-DeveloperFixture
+Assert ($partial.Code -eq 1 -and !$partial.Report.ready -and $partial.Report.repositories.Status -eq 'Ready' -and $partial.Report.workspace.Status -eq 'Ready' -and $partial.Report.display.Status -eq 'Ready') 'An unrelated incompatible app leaves the run incomplete while repositories, workspace, and display finish'
+Remove-Item "$scratch/powershell/sevenzip.incompatible"
+Set-Content "$scratch/powershell/node.incompatible" 'fixture'
+$partialNode = Invoke-DeveloperFixture
+Assert ($partialNode.Code -eq 1 -and $partialNode.Report.repositories.Status -eq 'Ready' -and $partialNode.Report.workspace.Status -eq 'Ready' -and $partialNode.Report.display.Status -eq 'Blocked') 'Missing display prerequisites block only display and dependent packages'
+Remove-Item "$scratch/powershell/node.incompatible"
+Set-Content "$scratch/display.fail" 'fixture'
+$displayConflict = Invoke-DeveloperFixture
+Assert ($displayConflict.Code -eq 1 -and $displayConflict.Report.workspace.Status -eq 'Ready' -and $displayConflict.Report.display.Status -eq 'Conflict') 'Display configuration conflicts preserve a successfully configured base workspace'
+Remove-Item "$scratch/display.fail"
+Set-Content "$scratch/powershell/inventory.fail" 'fixture'
+$repoFailure = Invoke-DeveloperFixture
+Assert ($repoFailure.Code -eq 1 -and $repoFailure.Report.repositories.Status -eq 'Conflict' -and $repoFailure.Report.workspace.Status -eq 'Ready' -and $repoFailure.Report.display.Status -eq 'Ready') 'Repository authentication failure does not prevent workspace and display configuration'
+Remove-Item "$scratch/powershell/inventory.fail"
+Set-Content "$scratch/powershell/github.incompatible" 'fixture'
+$githubFailure = Invoke-DeveloperFixture
+Assert ($githubFailure.Code -eq 1 -and $githubFailure.Report.repositories.Status -eq 'Blocked' -and $githubFailure.Report.workspace.Status -eq 'Ready') 'GitHub CLI is required for repositories but not the base workspace'
+Remove-Item "$scratch/powershell/github.incompatible"
 # A package failure must leave a useful report and still inspect independent packages.
 Remove-Item "$scratch/powershell/git.installed"
 Set-Content "$scratch/powershell/git.fail" 'fixture'
